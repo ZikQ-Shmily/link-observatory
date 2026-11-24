@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>链路观测</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div id="ip-monitor-console">
+    <div class="console-shell">
+      <header class="console-top">
+        <img class="console-brand" alt="链路观测" width="225" height="64" src="/logo.svg">
+        <nav aria-label="管理端导航" data-navigation hidden>
+          <button type="button" data-view="overview" aria-current="page">总览</button>
+          <button type="button" data-view="targets">监测目标</button>
+          <button type="button" data-view="nodes">探针节点</button>
+          <button type="button" data-view="events">异常事件</button>
+        </nav>
+        <div class="account-actions" role="group" aria-label="管理设置" data-account-actions hidden>
+          <button type="button" class="text-action" data-action="mail-settings">邮件提醒</button>
+          <button type="button" class="text-action" data-action="change-password">修改密码</button>
+          <button type="button" class="text-action" data-action="logout">退出登录</button>
+        </div>
+      </header>
+      <main class="console-main" data-page="overview">
+        <p class="form-message" role="status" data-notice hidden></p>
+        <div data-content><p class="empty">正在连接管理端…</p></div>
+      </main>
+    </div>
+    <dialog class="console-dialog" aria-labelledby="dialog-title" data-dialog></dialog>
+  </div>
+</body>
+</html>

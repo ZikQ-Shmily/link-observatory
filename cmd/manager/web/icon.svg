@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="链路观测图标">
+  <rect width="64" height="64" rx="16" fill="#1C2024"/>
+  <path d="M15 21h12l11 11h11M15 43h8l11-11h4" fill="none" stroke="#FDFDFD" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="49" cy="32" r="6.5" fill="#81B5FF"/>
+</svg>

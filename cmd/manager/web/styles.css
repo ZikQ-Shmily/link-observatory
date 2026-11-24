@@ -1,0 +1,499 @@
+#ip-monitor-console {
+    --paper: #fdfdfd;
+    --surface-soft: #f6f6f8;
+    --panel: #fff;
+    --ink: #1c2024;
+    --muted: #60646c;
+    --line: #f0f0f3;
+    --edge: #dcdee0;
+    --primary: #000;
+    --primary-active: #1a1a1a;
+    --link: #0d74ce;
+    --terminal: #171717;
+    --success: #167342;
+    --success-soft: #e8f7ed;
+    --danger: #a12f37;
+    --danger-soft: #fceef0;
+    --warning: #845007;
+    --warning-soft: #fff5e4;
+    --quiet: #f0f0f3;
+    --gutter: clamp(20px, 4.7vw, 48px);
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+    color-scheme: light;
+    color: var(--ink);
+    font: 400 14px/1.5 Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  #ip-monitor-console * { box-sizing: border-box; }
+  #ip-monitor-console [hidden] { display: none !important; }
+  #ip-monitor-console :is(h1,h2,p,dl,dd) { margin: 0; }
+  #ip-monitor-console :is(h1,h2) { font-family: inherit; }
+  #ip-monitor-console :is(button,input,textarea) { font: inherit; }
+  #ip-monitor-console :is(button,input,textarea):focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 3px;
+  }
+  #ip-monitor-console button { color: inherit; cursor: pointer; }
+  #ip-monitor-console :is(code,time,.mono) { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  #ip-monitor-console :is(i[data-lucide],svg.lucide) { width: 16px; height: 16px; flex: none; }
+  #ip-monitor-console i[data-lucide] { display: none; }
+  #ip-monitor-console .console-shell {
+    background: var(--paper);
+    border: 1px solid var(--edge);
+    border-radius: 16px;
+    overflow: clip;
+  }
+  #ip-monitor-console .console-top {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+    min-height: 64px;
+    padding: 0 max(100px, var(--gutter)) 0 var(--gutter);
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+  }
+  #ip-monitor-console .console-brand { display: block; flex: none; width: auto; height: 32px; }
+  #ip-monitor-console .console-top nav { display: flex; flex-wrap: wrap; gap: 4px; }
+  #ip-monitor-console .console-top nav button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 7px 11px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    white-space: nowrap;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  #ip-monitor-console .console-top nav button:hover,
+  #ip-monitor-console .console-top nav button[aria-current="page"] {
+    color: var(--ink);
+    background: var(--quiet);
+  }
+  #ip-monitor-console .console-main {
+    min-width: 0;
+    padding: 18px var(--gutter) 32px;
+  }
+  #ip-monitor-console .console-context {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  #ip-monitor-console .console-demo {
+    padding: 3px 8px;
+    border: 1px solid var(--edge);
+    border-radius: 9999px;
+    background: var(--surface-soft);
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  #ip-monitor-console .console-clock {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  #ip-monitor-console .console-clock svg { width: 13px; height: 13px; }
+  #ip-monitor-console .page-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  #ip-monitor-console h1 { font-size: 36px; font-weight: 600; line-height: 1.15; }
+  #ip-monitor-console .overview-hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding-block: 24px 30px;
+  }
+  #ip-monitor-console .overview-hero h1 { font-size: clamp(42px, 5.3vw, 56px); line-height: 1.09; }
+  #ip-monitor-console .overview-intro > p { margin-top: 13px; color: var(--muted); }
+  #ip-monitor-console .hero-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+  #ip-monitor-console .hero-actions .action:not(.primary) { background: var(--quiet); border-color: transparent; }
+  #ip-monitor-console .hero-actions .action:not(.primary):hover { background: var(--edge); }
+  #ip-monitor-console h2 { font-size: 18px; font-weight: 600; }
+  #ip-monitor-console .page-heading p { margin-top: 8px; font-size: 13px; }
+  #ip-monitor-console [data-page="detail"] .page-heading p { font-family: var(--mono); }
+  #ip-monitor-console .subtle { color: var(--muted); font-size: 12px; }
+  #ip-monitor-console .action {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    min-height: 40px;
+    padding: 8px 14px;
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 9999px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+  #ip-monitor-console .action:hover { background: var(--quiet); }
+  #ip-monitor-console .action.primary { color: #fff; background: var(--primary); border-color: var(--primary); padding-inline: 17px; }
+  #ip-monitor-console .action.primary:hover { background: var(--primary-active); }
+  #ip-monitor-console .text-action {
+    padding: 3px 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    font-weight: 600;
+  }
+  #ip-monitor-console .text-action:hover { text-decoration: underline; text-underline-offset: 3px; }
+  #ip-monitor-console .inline-link { color: var(--link); }
+  #ip-monitor-console .surface {
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+  }
+  #ip-monitor-console .metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0,1fr));
+    border-block: 1px solid var(--line);
+    margin-bottom: 28px;
+  }
+  #ip-monitor-console .metric { display: flex; align-items: baseline; justify-content: center; gap: 9px; padding: 14px 10px; }
+  #ip-monitor-console .metric + .metric { border-left: 1px solid var(--line); }
+  #ip-monitor-console .metric dt { color: var(--muted); font-size: 13px; }
+  #ip-monitor-console .metric dd { order: -1; font-size: 26px; font-weight: 500; letter-spacing: -.045em; line-height: 1.12; }
+  #ip-monitor-console .metric dd small { font-size: 13px; color: var(--muted); }
+  #ip-monitor-console .metric .num-alert { color: var(--danger); }
+  #ip-monitor-console .overview-results { padding: 14px; border-radius: 24px; background: var(--surface-soft); }
+  #ip-monitor-console .overview-results .surface { border-color: var(--line); }
+  #ip-monitor-console .section-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 14px 18px 12px;
+  }
+  #ip-monitor-console .surface + .surface { margin-top: 16px; }
+  #ip-monitor-console table { width: 100%; border-collapse: collapse; text-align: left; }
+  #ip-monitor-console th {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--surface-soft);
+  }
+  #ip-monitor-console :is(th,td) { padding: 10px 7px; border-top: 1px solid var(--line); vertical-align: middle; }
+  #ip-monitor-console tr > :first-child { padding-left: 16px; }
+  #ip-monitor-console tr > :last-child { padding-right: 16px; }
+  #ip-monitor-console .target-table th[colspan] { padding-top: 6px; padding-bottom: 3px; }
+  #ip-monitor-console .target-table th[scope="colgroup"],
+  #ip-monitor-console .target-table thead tr:nth-child(2) th { text-align: left; }
+  #ip-monitor-console .target-table thead tr:nth-child(2) th { padding: 0 7px 7px; border-top: 0; }
+  #ip-monitor-console .target-table tr > :nth-child(4),
+  #ip-monitor-console .target-table thead tr:nth-child(2) th:nth-child(3) { border-left: 1px solid var(--line); padding-left: 10px; }
+  #ip-monitor-console .target-table thead tr:nth-child(2) th:last-child { border-left: none; }
+  #ip-monitor-console .target-table th[scope="colgroup"]:nth-child(3) { border-left: 1px solid var(--line); padding-left: 10px; }
+  #ip-monitor-console .target-table td:first-child, #ip-monitor-console .node-table td:first-child { min-width: 118px; }
+  #ip-monitor-console .node-table td:nth-child(2), #ip-monitor-console .node-table td:nth-child(3) {
+    overflow-wrap: anywhere;
+  }
+  #ip-monitor-console code.target-address { display: block; padding: 0; background: transparent; color: var(--muted); font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+  #ip-monitor-console .target-table tbody tr[data-state="bad"] { background: #fffafb; }
+  #ip-monitor-console .target-table tbody tr:hover { background: #f7f9fc; }
+  #ip-monitor-console .probe {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  #ip-monitor-console .probe svg { width: 12px; height: 12px; }
+  #ip-monitor-console .ok { color: var(--success); }
+  #ip-monitor-console .bad { color: var(--danger); }
+  #ip-monitor-console .warn { color: var(--warning); }
+  #ip-monitor-console .quiet { color: var(--muted); }
+  #ip-monitor-console .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: fit-content;
+    padding: 4px 9px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  #ip-monitor-console .badge svg { width: 12px; height: 12px; }
+  #ip-monitor-console .badge.ok { background: var(--success-soft); }
+  #ip-monitor-console .badge.bad { background: var(--danger-soft); }
+  #ip-monitor-console .badge.warn { background: var(--warning-soft); }
+  #ip-monitor-console .badge.quiet { background: var(--quiet); }
+  #ip-monitor-console .back { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+  #ip-monitor-console .evidence {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--surface-soft);
+    margin-bottom: 16px;
+  }
+  #ip-monitor-console .evidence[data-state="bad"] { background: var(--danger-soft); border-color: transparent; }
+  #ip-monitor-console .evidence[data-state="warn"] { background: var(--warning-soft); border-color: transparent; }
+  #ip-monitor-console .evidence[data-state="ok"] { background: var(--success-soft); border-color: transparent; }
+  #ip-monitor-console .evidence strong { font-weight: 600; }
+  #ip-monitor-console .evidence p { font-size: 13px; margin-top: 4px; color: var(--muted); }
+  #ip-monitor-console .evidence > svg { margin-top: 3px; }
+  #ip-monitor-console .rounds { padding: 0 16px 11px; }
+  #ip-monitor-console .round-row, #ip-monitor-console .round-axis {
+    display: grid;
+    grid-template-columns: 90px repeat(12, minmax(0,1fr));
+    gap: 4px;
+    align-items: center;
+  }
+  #ip-monitor-console .round-row + .round-row { margin-top: 5px; }
+  #ip-monitor-console .round-name { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  #ip-monitor-console .round-block { height: 12px; border-radius: 3px; background: var(--quiet); }
+  #ip-monitor-console .round-block.ok { background: #9dd5b4; }
+  #ip-monitor-console .round-block.bad { background: #eb8e90; }
+  #ip-monitor-console .round-block.warn { background: #efc878; }
+  #ip-monitor-console .round-axis { margin-top: 5px; }
+  #ip-monitor-console .round-axis time { color: var(--muted); font-size: 11px; grid-column: span 3; }
+  #ip-monitor-console .round-axis time:first-child { grid-column: 2 / span 3; }
+  #ip-monitor-console .round-axis time:last-child { grid-column: 11 / -1; text-align: right; }
+  #ip-monitor-console .time-legend { display: flex; gap: 10px; flex-wrap: wrap; }
+  #ip-monitor-console .time-legend span { display: inline-flex; align-items: center; gap: 4px; }
+  #ip-monitor-console .time-legend b { width: 8px; height: 8px; }
+  #ip-monitor-console .console-dialog {
+    width: min(500px, calc(100% - 24px));
+    max-height: min(90%, 650px);
+    padding: 0;
+    color: var(--ink);
+    border: 1px solid var(--edge);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  #ip-monitor-console .console-dialog::backdrop { background: rgb(23 23 23 / 36%); }
+  #ip-monitor-console .dialog-head { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 17px 19px 13px; border-bottom: 1px solid var(--line); }
+  #ip-monitor-console .dialog-head p { margin-top: 3px; }
+  #ip-monitor-console .dialog-body { padding: 15px 19px 17px; }
+  #ip-monitor-console .dialog-body label { display: grid; gap: 6px; font-size: 13px; font-weight: 500; min-width: 0; }
+  #ip-monitor-console .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+  #ip-monitor-console .full-field { grid-column: 1 / -1; }
+  #ip-monitor-console :is(input,textarea) {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    color: var(--ink);
+    background: var(--panel);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+  }
+  #ip-monitor-console .group-field { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+  #ip-monitor-console .group-field legend { padding: 0; margin-bottom: 6px; font-size: 13px; font-weight: 500; }
+  #ip-monitor-console .group-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-height: 44px;
+    padding: 3px;
+    background: var(--surface-soft);
+    border: 1px solid var(--edge);
+    border-radius: 8px;
+  }
+  #ip-monitor-console .group-options input {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    clip-path: inset(50%);
+  }
+  #ip-monitor-console .group-options span {
+    display: grid;
+    place-items: center;
+    padding: 4px;
+    border-radius: 5px;
+    color: var(--muted);
+    text-align: center;
+    cursor: pointer;
+  }
+  #ip-monitor-console .group-options input:checked + span {
+    background: var(--primary);
+    color: #fff;
+  }
+  #ip-monitor-console .group-options input:focus-visible + span {
+    outline: 2px solid var(--link);
+    outline-offset: 1px;
+  }
+  #ip-monitor-console textarea {
+    min-height: 154px;
+    padding: 14px;
+    border-radius: 12px;
+    border-color: var(--terminal);
+    color: #fff;
+    background: var(--terminal);
+    resize: vertical;
+    font: 13px/1.5 var(--mono);
+    overflow-wrap: anywhere;
+  }
+  #ip-monitor-console .dialog-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 13px;
+  }
+  #ip-monitor-console .dialog-actions [role="status"] { margin-right: auto; }
+  #ip-monitor-console .install-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+  #ip-monitor-console .install-note { margin-top: 8px; }
+  #ip-monitor-console .install-scope { margin-bottom: 12px; }
+  #ip-monitor-console .install-scope code {
+    display: block;
+    margin-top: 4px;
+    padding: 0;
+    background: transparent;
+    color: var(--ink);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+  #ip-monitor-console .short-command { min-height: 86px; }
+  #ip-monitor-console .node-actions { display: flex; flex-wrap: wrap; gap: 0 12px; }
+  #ip-monitor-console .node-actions button { white-space: nowrap; }
+  #ip-monitor-console .empty { padding: 15px 16px; color: var(--muted); }
+  #ip-monitor-console .mobile-label { display: none; }
+  @media (max-width: 690px) {
+    #ip-monitor-console .console-top {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px var(--gutter) 8px;
+    }
+    #ip-monitor-console .console-top nav button { font-size: 13px; }
+    #ip-monitor-console .console-context { margin-bottom: 14px; }
+    #ip-monitor-console .overview-hero { padding-block: 10px 22px; }
+    #ip-monitor-console .overview-hero h1 { font-size: 42px; }
+  }
+  @media (max-width: 550px) {
+    #ip-monitor-console { --gutter: 14px; }
+    #ip-monitor-console .console-top nav { gap: 2px; }
+    #ip-monitor-console .console-top nav button { padding-inline: 7px; font-size: 12px; }
+    #ip-monitor-console .console-top nav button svg { display: none; }
+    #ip-monitor-console .console-main { padding-block: 12px 20px; }
+    #ip-monitor-console h1 { font-size: 30px; }
+    #ip-monitor-console .overview-hero h1 { font-size: 35px; }
+    #ip-monitor-console .page-heading { margin-bottom: 16px; }
+    #ip-monitor-console .metrics { margin-bottom: 18px; }
+    #ip-monitor-console .metric { flex-direction: column; gap: 4px; align-items: center; padding: 9px 5px; }
+    #ip-monitor-console .metric dt { font-size: 11px; }
+    #ip-monitor-console .metric dd { font-size: 23px; }
+    #ip-monitor-console .metric dd small { font-size: 11px; }
+    #ip-monitor-console .overview-results { padding: 0; background: transparent; }
+    #ip-monitor-console .section-heading { padding: 10px 12px; }
+    #ip-monitor-console table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+    #ip-monitor-console table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
+    #ip-monitor-console table tbody tr td:nth-child(n),
+    #ip-monitor-console .target-table tbody tr td:nth-child(4) { padding: 4px 0; border: 0; }
+    #ip-monitor-console table td:first-child, #ip-monitor-console .target-table td:last-child, #ip-monitor-console .event-table td:last-child { grid-column: 1 / -1; }
+    #ip-monitor-console .node-table td:last-child { grid-column: 1 / -1; }
+    #ip-monitor-console .mobile-label { display: block; color: var(--muted); font-size: 11px; }
+    #ip-monitor-console .rounds { padding: 0 10px 10px; }
+    #ip-monitor-console .round-row, #ip-monitor-console .round-axis { grid-template-columns: 71px repeat(12, minmax(0,1fr)); gap: 2px; }
+  }
+  @media (pointer: coarse) {
+    #ip-monitor-console :is(.console-top nav button,.action,.text-action) { min-height: 44px; }
+  }
+
+body { margin: 0; background: #fdfdfd; }
+#ip-monitor-console .console-shell { min-height: 100vh; border: 0; border-radius: 0; }
+#ip-monitor-console .console-main { max-width: 1280px; margin-inline: auto; }
+#ip-monitor-console .console-top { padding-right: var(--gutter); }
+#ip-monitor-console .account-actions { display: flex; gap: 12px; margin-left: auto; color: var(--muted); white-space: nowrap; }
+#ip-monitor-console .table-wide { overflow-x: auto; }
+#ip-monitor-console .data-place { overflow-wrap: anywhere; }
+#ip-monitor-console .history-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; }
+#ip-monitor-console .history-bars .round-block { min-width: 0; }
+#ip-monitor-console .round-block.insufficient { background: #8da1b9; }
+#ip-monitor-console .round-block.missing { background: transparent; border: 1px dashed #7e8a93; }
+#ip-monitor-console .history-labels { display: flex; justify-content: space-between; gap: 6px; margin-top: 5px; }
+#ip-monitor-console .history-labels time:only-child { margin-inline-start: auto; }
+#ip-monitor-console .history-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; list-style: none; padding: 0; margin: 0 0 9px; }
+#ip-monitor-console .history-legend li { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+#ip-monitor-console .history-legend .round-block { width: 10px; height: 10px; }
+#ip-monitor-console .history-detail .round-block { height: 28px; }
+#ip-monitor-console .history-detail .history-legend .round-block { height: 10px; }
+#ip-monitor-console .history-detail button.round-block { padding: 0; border: 1px solid transparent; }
+#ip-monitor-console .history-detail button.round-block.missing { border: 1px dashed #7e8a93; }
+#ip-monitor-console .history-detail button.round-block[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+#ip-monitor-console .history-details { display: grid; gap: 6px; margin-top: 12px; padding: 12px; background: var(--surface-soft); border-radius: 8px; }
+#ip-monitor-console .history-details-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+#ip-monitor-console .history-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 6px 12px; }
+#ip-monitor-console .history-counts dt { color: var(--muted); font-size: 12px; }
+#ip-monitor-console .history-counts dd { font-weight: 600; }
+#ip-monitor-console .detail-grid { display: grid; gap: 16px; }
+#ip-monitor-console :is(.target-address, .page-heading .subtle) { overflow-wrap: anywhere; }
+#ip-monitor-console .login { width: min(100%, 420px); margin: clamp(40px, 9vw, 100px) auto; }
+#ip-monitor-console .login h1 { margin-bottom: 24px; }
+#ip-monitor-console form label { display: grid; gap: 6px; min-width: 0; }
+#ip-monitor-console .form-message { color: var(--danger); margin: 12px 0; overflow-wrap: anywhere; }
+#ip-monitor-console .form-message.status-success { color: var(--success); }
+#ip-monitor-console .form-message:empty { display: none; }
+#ip-monitor-console .action:disabled { opacity: .55; cursor: default; }
+#ip-monitor-console .form-fields { display: grid; gap: 12px; }
+#ip-monitor-console .dialog-body .token-field { margin-top: 12px; }
+#ip-monitor-console .row-label { display: block; }
+#ip-monitor-console .event-note { margin: 12px 0; color: var(--muted); }
+#ip-monitor-console .badge { max-width: 100%; white-space: normal; }
+#ip-monitor-console .address-plain { background: none; color: var(--muted); }
+@media (max-width: 690px) {
+  #ip-monitor-console .console-top { position: relative; padding-right: var(--gutter); }
+  #ip-monitor-console .account-actions { position: absolute; top: 14px; right: var(--gutter); }
+}
+#ip-monitor-console .reorder-name { display: flex; align-items: center; gap: 8px; }
+#ip-monitor-console .reorder-name > div { min-width: 0; }
+#ip-monitor-console .reorder-grip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+#ip-monitor-console .reorder-grip:hover { background: var(--surface-soft); }
+#ip-monitor-console .reorder-grip:active { cursor: grabbing; }
+#ip-monitor-console .grip-dots {
+  width: 12px;
+  height: 18px;
+  background: radial-gradient(circle, currentColor 1px, transparent 1.5px) 0 0 / 6px 6px;
+}
+#ip-monitor-console tr[data-dragging] { opacity: .45; }
+#ip-monitor-console tr[data-drop="before"] { box-shadow: inset 0 2px var(--link); }
+#ip-monitor-console tr[data-drop="after"] { box-shadow: inset 0 -2px var(--link); }
+#ip-monitor-console .dialog-body .check-field { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+#ip-monitor-console .check-field input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  flex: none;
+  accent-color: var(--primary);
+}
+#ip-monitor-console .mail-events { column-gap: 10px; row-gap: 2px; }
+@media (max-width: 550px) {
+  #ip-monitor-console .account-actions { gap: 7px; font-size: 12px; }
+  #ip-monitor-console .console-brand { height: 28px; }
+  #ip-monitor-console .reorder-grip { width: 36px; height: 44px; }
+}

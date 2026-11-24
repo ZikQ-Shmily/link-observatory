@@ -1,0 +1,57 @@
+name: CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check installer and Go code
+        run: |
+          bash -n install.sh
+          bash -n scripts/install.sh
+          bash -n scripts/package-install.sh
+          bash -n cmd/manager/install_bootstrap.sh
+          node --check cmd/manager/web/app.js
+          go vet ./...
+          go test ./...
+      - name: Verify Linux ICMP loopback and permission handling
+        run: |
+          test_dir=$(mktemp -d)
+          chmod 755 "$test_dir"
+          CGO_ENABLED=0 go test -c -o "$test_dir/probe.test" ./cmd/agent
+          sudo --non-interactive unshare --net bash -euo pipefail -s -- "$test_dir/probe.test" <<'ICMP_TEST'
+          ip link set lo up
+          sysctl -q -w 'net.ipv4.ping_group_range=0 2147483647'
+          setpriv --reuid 65534 --regid 65534 --clear-groups \
+            env LINK_TEST_ICMP_MODE=dgram "$1" -test.run '^TestLinuxPingModes$' -test.v
+          sysctl -q -w 'net.ipv4.ping_group_range=1 0'
+          LINK_TEST_ICMP_MODE=raw "$1" -test.run '^TestLinuxPingModes$' -test.v
+          setpriv --bounding-set=-net_raw \
+            env LINK_TEST_ICMP_MODE=denied "$1" -test.run '^TestLinuxPingModes$' -test.v
+          ICMP_TEST
+      - name: Build node binaries
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go build -trimpath -o "/tmp/link-probe-linux-$arch" ./cmd/agent
+          done
+      - name: Build manager container
+        run: docker build -t link-observatory:ci .
+      - name: Start the manager with the Compose runtime restrictions
+        run: |
+          docker run -d --name manager-smoke -p 127.0.0.1::8080 \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --mount source=manager-smoke-data,target=/data \
+            -e ADMIN_PASSWORD=ci-test-password link-observatory:ci
+          trap 'docker logs manager-smoke; docker rm -f manager-smoke' EXIT
+          endpoint=$(docker port manager-smoke 8080/tcp)
+          curl --fail --silent --show-error --retry 8 --retry-connrefused \
+            "http://$endpoint/healthz"
