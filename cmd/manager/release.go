@@ -12,12 +12,14 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"link-observatory/internal/protocol"
 )
 
 const (
 	installerRepo                  = "ZikQ-Shmily/link-observatory"
 	latestInstallerAPI             = "https://api.github.com/repos/" + installerRepo + "/releases/latest"
-	officialReleaseDownloadPrefix  = "https://github.com/" + installerRepo + "/releases/download/"
+	officialReleaseDownloadPrefix  = protocol.ReleaseDownloadPrefix
 	installerLookupTimeout         = 5 * time.Second
 	installerLookupTTL             = 5 * time.Minute
 	installerLookupRetry           = 30 * time.Second

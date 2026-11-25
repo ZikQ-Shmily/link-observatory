@@ -15,21 +15,23 @@ import (
 )
 
 type nodeView struct {
-	EgressIPv4       string     `json:"egress_ipv4,omitempty"`
-	EgressIPv6       string     `json:"egress_ipv6,omitempty"`
-	RouteReady       bool       `json:"route_ready"`
-	ID               string     `json:"id"`
-	Name             string     `json:"name"`
-	Location         string     `json:"location"`
-	ISP              string     `json:"isp"`
-	Group            string     `json:"group"`
-	State            string     `json:"state"`
-	Version          string     `json:"version,omitempty"`
-	LastSeen         *time.Time `json:"last_seen,omitempty"`
-	ICMPv4           bool       `json:"icmp_v4"`
-	ICMPv6           bool       `json:"icmp_v6"`
-	ManageCommand    string     `json:"manage_command"`
-	UninstallCommand string     `json:"uninstall_command"`
+	ManagedUpdates   bool        `json:"managed_updates"`
+	Update           *updateView `json:"update,omitempty"`
+	EgressIPv4       string      `json:"egress_ipv4,omitempty"`
+	EgressIPv6       string      `json:"egress_ipv6,omitempty"`
+	RouteReady       bool        `json:"route_ready"`
+	ID               string      `json:"id"`
+	Name             string      `json:"name"`
+	Location         string      `json:"location"`
+	ISP              string      `json:"isp"`
+	Group            string      `json:"group"`
+	State            string      `json:"state"`
+	Version          string      `json:"version,omitempty"`
+	LastSeen         *time.Time  `json:"last_seen,omitempty"`
+	ICMPv4           bool        `json:"icmp_v4"`
+	ICMPv6           bool        `json:"icmp_v6"`
+	ManageCommand    string      `json:"manage_command"`
+	UninstallCommand string      `json:"uninstall_command"`
 }
 
 type nodeEnrollment struct {
@@ -69,6 +71,7 @@ func describeNode(node nodeRecord, now time.Time) nodeView {
 	view := nodeView{
 		ID: node.ID, Name: node.Name, Location: node.Location, ISP: node.ISP, Group: node.Group,
 		State: "pending", Version: node.Version, ICMPv4: node.ICMPv4, ICMPv6: node.ICMPv6,
+		ManagedUpdates: node.ManagedUpdates, Update: node.Update.view(now),
 		ManageCommand: manage, UninstallCommand: manage + " uninstall",
 		EgressIPv4: node.egress(4, now.Unix()), EgressIPv6: node.egress(6, now.Unix()), RouteReady: node.RouteReady,
 	}

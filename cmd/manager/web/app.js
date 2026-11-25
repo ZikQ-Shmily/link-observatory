@@ -17,9 +17,8 @@ let rowDrag = null;
 let reorderPending = false;
 
 const mailEvents = [
-  ["probe_offline", "探针离线"], ["probe_recovery", "探针恢复"],
-  ["tcp_failure", "目标 TCPing 异常"], ["tcp_recovery", "目标 TCPing 恢复"],
-  ["icmp_failure", "目标 ICMP 异常"], ["icmp_recovery", "目标 ICMP 恢复"], ["route_change", "路由变化"]
+  ["probe_status", "探针状态"], ["tcp_status", "TCPing 状态"],
+  ["icmp_status", "ICMP 状态"], ["route_change", "路由变化"]
 ];
 
 const verdicts = {
@@ -260,11 +259,13 @@ function routePanel(target) {
   }
   if (routeView.panel === "changes") return routeChanges(data);
   const status = { pending: ["quiet", "未部署"], offline: ["quiet", "离线"], unavailable: ["warn", "NextTrace 不可用"], online: ["ok", "在线"] };
+  const runnerVersion = data.runner_version ? '<span class="target-address">版本 ' + escape(data.runner_version) + '</span>' : "";
   const header = '<section class="surface"><div class="section-heading"><div><h2>定时路由追踪</h2><p class="subtle">' +
     (data.enabled ? "每 " + escape(data.minutes) + " 分钟" : "已关闭") + " · 回程端 " + badge(status[data.runner] ?? status.pending) +
-    '</p></div><div class="node-actions">' + action("路由设置", "route-settings", target.id) +
+    '</p>' + runnerVersion + updateStatus(data.runner_update) + '</div><div class="node-actions">' +
+    action("路由设置", "route-settings", target.id) +
     (data.runner === "pending" ? action("部署回程端", "return-install", target.id) :
-      action("更新回程端", "return-update", target.id) + action("解绑回程端", "return-remove", target.id, false, true)) +
+      action("更新回程端", "show-return-update", target.id) + action("解绑回程端", "return-remove", target.id, false, true)) +
     "</div></div></section>";
   if (!data.enabled) return header;
   const probe = state.data.nodes.find(node => node.id === routeView.probe) ?? state.data.nodes[0];
@@ -331,7 +332,7 @@ function nodes() {
     const capability = node.state === "pending" ? "待自检" :
       (node.icmp_v4 ? "IPv4" : "") + (node.icmp_v4 && node.icmp_v6 ? " / " : "") + (node.icmp_v6 ? "IPv6" : "") || "不可用";
     const deployment = node.state === "pending" ? action("生成注册令牌", "rotate-token", node.id, false, true) :
-      state.data.release_configured ? action("更新命令", "update-command", node.id, false, true) : "";
+      state.data.release_configured ? action("更新", "show-node-update", node.id, false, true) : "";
     const isLatest = node.version && node.version === state.data.latest_probe_version;
     const version = isLatest ? "latest" : node.version;
     const controls = action("编辑", "edit-node", node.id, false, true) +
@@ -339,7 +340,7 @@ function nodes() {
     return '<tr><td><div class="reorder-name">' + reorderGrip(node) +
       '<div><strong>' + escape(node.name) + '</strong><code class="target-address"' +
       (isLatest ? ' title="' + escape(node.version) + '"' : "") + '>' +
-      escape(node.id + (version ? " · " + version : "")) + "</code>" + egressLines(node) + "</div></div></td>" +
+      escape(node.id + (version ? " · " + version : "")) + "</code>" + updateStatus(node.update) + egressLines(node) + "</div></div></td>" +
       cell("运营商", escape(node.isp)) + cell("地区", escape(node.location)) +
       cell("分组", node.group === "mainland" ? "大陆观测" : "境外观测") +
       cell("连接", badge(nodeLabels[node.state] ?? nodeLabels.pending)) +
@@ -602,6 +603,36 @@ function showInstallDialog(node, token = "", subtitle = node.name, back = false,
   if (back) resetCommand();
   else void generateCommand();
 }
+const updateStates = {
+  queued: ["quiet", "等待节点领取"],
+  running: ["warn", "更新中"],
+  succeeded: ["ok", "更新完成"],
+  failed: ["bad", "更新失败"],
+  expired: ["warn", "更新超时"]
+};
+function updateStatus(task) {
+  const appearance = updateStates[task?.status];
+  if (!appearance) return "";
+  return '<div class="update-feedback">' + badge(appearance) +
+    '<span class="subtle">' + escape(task.version) + "</span></div>";
+}
+function showUpdateDialog(item, back = false) {
+  const data = routeView.data;
+  const supported = back ? data?.runner_managed_updates : item.managed_updates;
+  const installed = back ? data?.runner_version : item.version;
+  const task = back ? data?.runner_update : item.update;
+  const busy = task?.status === "queued" || task?.status === "running";
+  const title = back ? "更新回程端" : "更新探针";
+  const help = supported ? "在主机上安装配置的发行版。更新完成后程序会自动重启。" :
+    "请先在主机上用 install.sh 升级到 v2.1.0 或更新版本。";
+  const manual = action("手动更新命令", back ? "return-update" : "update-command", item.id);
+  openDialog(title, item.name,
+    '<form data-form="' + (back ? "queue-return-update" : "queue-node-update") +
+    '" data-id="' + escape(item.id) + '"><p>' + help + '</p>' +
+    (installed ? '<p class="subtle">当前版本 ' + escape(installed) + '</p>' : '') + updateStatus(task) +
+    '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' + manual +
+    (supported && !busy ? '<button type="submit" class="action primary">开始更新</button>' : '') + '</div></form>');
+}
 function routeEndpoint(id, operation = "routes") {
   return "targets/" + encodeURIComponent(id) + "/" + operation;
 }
@@ -797,7 +828,9 @@ root.addEventListener("click", async event => {
     } else if (action === "route-settings" && target && routeView.data) routeSettingsDialog(target);
     else if ((action === "return-install" || action === "return-update") && target) {
       showInstallDialog(target, "", target.name, true, action === "return-update");
-    } else if (action === "return-remove" && target) removeReturnDialog(target);
+    } else if (action === "show-return-update" && target) showUpdateDialog(target, true);
+    else if (action === "show-node-update" && node) showUpdateDialog(node);
+    else if (action === "return-remove" && target) removeReturnDialog(target);
     else if (action === "round-detail" && state.view === "detail") selectRound(id);
     else if (action === "update-command" && node) showInstallDialog(node);
     else if (action === "rotate-token" && node) showEnrollment(await api("nodes/" + encodeURIComponent(id) + "/token", "POST"));
@@ -830,6 +863,13 @@ root.addEventListener("submit", async event => {
       await api(id ? "targets/" + encodeURIComponent(id) : "targets", id ? "PUT" : "POST", values);
       dialog.close();
       await refresh();
+    } else if (mode === "queue-node-update" || mode === "queue-return-update") {
+      const back = mode === "queue-return-update";
+      await api(back ? routeEndpoint(id, "return-update") : "nodes/" + encodeURIComponent(id) + "/update", "POST");
+      dialog.close();
+      if (back) await loadRoutes(id);
+      else await refresh();
+      message("更新任务已提交。", true);
     } else if (mode === "route-settings" || mode === "return-remove") {
       if (mode === "route-settings") {
         await api(routeEndpoint(id), "PUT", { enabled: form.elements.enabled.checked, minutes: Number(values.minutes) });

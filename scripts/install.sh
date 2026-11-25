@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Link Observatory managed node installer.
+# Link Observatory managed updates v1.
 set +x +v
 set -euo pipefail
 umask 077
@@ -364,13 +365,10 @@ install_node() {
             fi
             cp -- "$agent" "$stage_dir/previous-probe"
         fi
-        stop_node || fail '无法停止当前实例，已保留当前安装'
         if [[ $action == update ]] && ! registered "$stage_dir/link-probe"; then
-            if [[ $was_running == true ]]; then
-                start_node || true
-            fi
             fail '现有节点凭证不可用，已保留原安装。请检查节点注册状态。'
         fi
+        stop_node || fail '无法停止当前实例，已保留当前安装'
         mv -- "$stage_dir/link-probe" "$agent"
     fi
 
@@ -410,13 +408,20 @@ update_from_manager() {
     [[ $origin =~ ^https://[^/?#@[:space:]]+$ ]] || fail '本地更新需要节点已保存的管理端 HTTPS 地址'
     need sha256sum
     stage_dir=$(mktemp -d "$nodes_dir/.update-$node.XXXXXXXX")
-    metadata="$stage_dir/release"
-    printf '正在获取发布信息，下载方式：%s\n' "$(download_mode)"
-    download "$origin/api/agent/installer-release" "$metadata" 0 ||
-        fail '无法获取发布信息，请确认管理端已经升级'
-    {
-        IFS= read -r release_url && IFS= read -r expected && IFS= read -r proxy_supported
-    } < "$metadata" || fail '管理端发布信息不完整'
+    if [[ -n $managed_version ]]; then
+        printf '管理端更新目标：%s\n' "$managed_version"
+        release_url="https://github.com/ZikQ-Shmily/link-observatory/releases/download/$managed_version"
+        expected=$managed_installer_sha
+        proxy_supported=true
+    else
+        printf '正在获取发布信息，下载方式：%s\n' "$(download_mode)"
+        metadata="$stage_dir/release"
+        download "$origin/api/agent/installer-release" "$metadata" 0 ||
+            fail '无法获取发布信息，请确认管理端已经升级'
+        {
+            IFS= read -r release_url && IFS= read -r expected && IFS= read -r proxy_supported
+        } < "$metadata" || fail '管理端发布信息不完整'
+    fi
     validate_release "$release_url"
     [[ $expected =~ ^[a-f0-9]{64}$ ]] || fail '管理端发布信息缺少有效的 SHA-256 校验值'
     args=(-e "$origin" --node "$node" --release-url "$release_url" --update)
@@ -486,15 +491,17 @@ uninstall_node() {
 
 unset inline_token enroll_token
 manager= node= release= action= inline_token= token_supplied=false
-gh_proxy= proxy_supplied=false
+gh_proxy= proxy_supplied=false managed_version= managed_installer_sha=
 while (( $# )); do
     case "$1" in
-        -e|--manager|--node|--release-url|--gh-proxy)
+        -e|--manager|--node|--release-url|--gh-proxy|--managed-version|--installer-sha256)
             (( $# >= 2 )) || fail "$1 缺少参数"
             case "$1" in
                 -e|--manager) manager=$2 ;;
                 --node) node=$2 ;;
                 --release-url) release=${2%/} ;;
+                --managed-version) managed_version=$2 ;;
+                --installer-sha256) managed_installer_sha=$2 ;;
                 --gh-proxy) normalize_gh_proxy "$2"; proxy_supplied=true ;;
             esac
             shift 2 ;;
@@ -510,6 +517,12 @@ while (( $# )); do
     esac
 done
 [[ $action != update || $token_supplied == false ]] || fail '更新节点无需提供注册码'
+
+if [[ -n $managed_version || -n $managed_installer_sha ]]; then
+    [[ $action == update && $proxy_supplied == false && -z $release && -z $manager &&
+        $managed_version =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ &&
+        $managed_installer_sha =~ ^[a-f0-9]{64}$ ]] || fail '无效的管理端更新任务'
+fi
 
 [[ $(uname -s) == Linux ]] || fail '节点安装脚本仅支持 Linux'
 system_install=false
@@ -614,6 +627,9 @@ elif [[ -f $node_dir/settings ]]; then
         local_entry=true
     fi
     if [[ $action == update ]]; then
+        if [[ -n $managed_version && $local_entry != true ]]; then
+            fail '管理端更新需使用节点本地安装脚本'
+        fi
         if [[ $local_entry == true ]]; then
             update_from_manager
         else

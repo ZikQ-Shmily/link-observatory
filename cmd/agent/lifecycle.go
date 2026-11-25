@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -82,15 +83,12 @@ func run(parent context.Context) error {
 		return err
 	}
 	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	routeDone := make(chan struct{})
-	go func() {
-		defer close(routeDone)
-		runRoutes(ctx, state)
-	}()
+	var background sync.WaitGroup
+	background.Go(func() { runRoutes(ctx, state) })
+	background.Go(func() { runManagedUpdates(ctx, state) })
 	defer func() {
 		cancel()
-		<-routeDone
+		background.Wait()
 	}()
 	done := make(chan struct{})
 	go func() {

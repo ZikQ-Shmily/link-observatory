@@ -200,4 +200,14 @@ esac
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("managed Tiny copy was not removed: %v", err)
 	}
+
+	before = read(trace)
+	expected := digest(read(filepath.Join(home, "update-script")))
+	run(false, script, "--update", "--managed-version", "v0.1.12", "--installer-sha256", digest("wrong"))
+	run(true, script, "--update", "--managed-version", "v0.1.12", "--installer-sha256", expected)
+	managedDownloads := strings.Split(strings.TrimSpace(strings.TrimPrefix(read(trace), before)), "\n")
+	if want := []string{proxy + "/" + update + "/install.sh", proxy + "/" + update + "/install.sh", proxy + "/" + update + "/link-probe-linux-amd64"}; !slices.Equal(managedDownloads, want) {
+		t.Fatalf("managed installer did not honor pinned artifact and saved proxy: %v", managedDownloads)
+	}
+
 }

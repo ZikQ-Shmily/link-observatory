@@ -38,11 +38,14 @@ const (
 	mailICMPFailure   mailKind = "icmp_failure"
 	mailICMPRecovery  mailKind = "icmp_recovery"
 	mailRouteChange   mailKind = "route_change"
+	mailProbeStatus   mailKind = "probe_status"
+	mailTCPStatus     mailKind = "tcp_status"
+	mailICMPStatus    mailKind = "icmp_status"
 	mailTest          mailKind = "test"
 )
 
 var mailKinds = []mailKind{
-	mailProbeOffline, mailProbeRecovery, mailTCPFailure, mailTCPRecovery, mailICMPFailure, mailICMPRecovery, mailRouteChange,
+	mailProbeStatus, mailTCPStatus, mailICMPStatus, mailRouteChange,
 }
 
 func (kind mailKind) failureKind() mailKind {
@@ -58,8 +61,31 @@ func (kind mailKind) failureKind() mailKind {
 	}
 }
 
+func (kind mailKind) group() mailKind {
+	switch kind.failureKind() {
+	case mailProbeOffline:
+		return mailProbeStatus
+	case mailTCPFailure:
+		return mailTCPStatus
+	case mailICMPFailure:
+		return mailICMPStatus
+	default:
+		return kind
+	}
+}
+
+func groupedMailEvents(events []mailKind) []mailKind {
+	grouped := make([]mailKind, 0, len(mailKinds))
+	for _, event := range events {
+		if group := event.group(); !slices.Contains(grouped, group) {
+			grouped = append(grouped, group)
+		}
+	}
+	return grouped
+}
+
 func (m mailSettings) wants(kind mailKind) bool {
-	return m.Enabled && slices.Contains(m.Events, kind)
+	return m.Enabled && slices.ContainsFunc(m.Events, func(event mailKind) bool { return event.group() == kind.group() })
 }
 
 func (m mailSettings) sameLogin(other mailSettings) bool {
@@ -77,6 +103,7 @@ func (s *server) getMailSettings(w http.ResponseWriter, _ *http.Request) {
 	s.mu.Unlock()
 	hasPassword := cfg.Password != ""
 	cfg.Password = ""
+	cfg.Events = groupedMailEvents(cfg.Events)
 	writeJSON(w, http.StatusOK, mailSettingsView{mailSettings: cfg, HasPassword: hasPassword})
 }
 
@@ -103,6 +130,7 @@ func readMailSettings(w http.ResponseWriter, r *http.Request, test bool) (mailSe
 		}
 	}
 	cfg.Recipients = recipients
+	cfg.Events = groupedMailEvents(cfg.Events)
 	if err := validateMailSettings(cfg, test); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return cfg, false
@@ -115,9 +143,6 @@ func validateMailSettings(cfg mailSettings, test bool) error {
 		if !slices.Contains(mailKinds, kind) {
 			return errors.New("请选择支持的邮件通知事件。")
 		}
-	}
-	if len(cfg.Events) > len(mailKinds) {
-		return errors.New("通知事件重复。")
 	}
 	if cfg.Enabled && len(cfg.Events) == 0 && !test {
 		return errors.New("请至少选择一种邮件通知。")

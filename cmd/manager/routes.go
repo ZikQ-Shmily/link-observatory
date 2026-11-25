@@ -398,7 +398,8 @@ func (s *server) targetRoutes(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": target.Route.Enabled, "minutes": target.routeStep() / 60,
-		"runner": status, "runner_id": runner.ID, "routes": results, "changes": changes, "egress_changes": s.state.EgressChanges,
+		"runner": status, "runner_id": runner.ID, "runner_version": runner.Version,
+		"runner_managed_updates": runner.ManagedUpdates, "runner_update": runner.Update.view(time.Now()), "routes": results, "changes": changes, "egress_changes": s.state.EgressChanges,
 		"runner_ipv4": runner.egress(4, time.Now().Unix()), "runner_ipv6": runner.egress(6, time.Now().Unix())})
 }
 

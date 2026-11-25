@@ -23,6 +23,8 @@ const (
 )
 
 type nodeRecord struct {
+	ManagedUpdates   bool          `json:"managed_updates,omitempty"`
+	Update           updateTask    `json:"update,omitzero"`
 	ID               string        `json:"id"`
 	Name             string        `json:"name"`
 	Location         string        `json:"location"`
@@ -163,6 +165,7 @@ func loadState(name string, now time.Time) (diskState, error) {
 			return state, errors.New("trailing data in state file")
 		}
 	}
+	state.Mail.Events = groupedMailEvents(state.Mail.Events)
 	if p := state.AdminPassword; p != nil && (len(p.Salt) != adminPasswordSaltSize || len(p.Hash) != adminPasswordHashSize) {
 		return state, errors.New("invalid stored admin password hash")
 	}

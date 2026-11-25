@@ -245,7 +245,9 @@ func flushReports(parent context.Context, client managerClient, reports *[]proto
 		if attempt == 0 {
 			index = len(queue) - 1
 		}
-		if err := client.request(ctx, http.MethodPost, reportPath, queue[index], nil, true); err != nil {
+		report := queue[index]
+		report.Version = version
+		if err := client.request(ctx, http.MethodPost, reportPath, report, nil, true); err != nil {
 			var status responseError
 			if !errors.As(err, &status) || status != http.StatusBadRequest && status != http.StatusUnprocessableEntity && status != http.StatusRequestEntityTooLarge {
 				return err
