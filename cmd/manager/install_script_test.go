@@ -231,4 +231,26 @@ esac
 		t.Fatalf("managed installer did not honor pinned artifact and saved proxy: %v", managedDownloads)
 	}
 
+	const returnID = "return-1234567890abcdef"
+	returnDir := filepath.Join(filepath.Dir(node), returnID)
+	returnScript := filepath.Join(returnDir, "install-return.sh")
+	legacyScript := filepath.Join(returnDir, "install.sh")
+	run(true, filepath.Join(home, "update-script"), "--manager", manager, "--node", returnID, "--token", "test-token", "--gh-proxy", proxy)
+	if got := run(true, returnScript, "--status"); !strings.Contains(got, returnID) || !strings.Contains(got, "运行状态：运行中") {
+		t.Fatalf("return runner could not use the return installer locally: %s", got)
+	}
+	if _, err := os.Stat(legacyScript); !os.IsNotExist(err) {
+		t.Fatalf("fresh return runner unexpectedly installed the probe entry point: %v", err)
+	}
+	if err := os.Rename(returnScript, legacyScript); err != nil {
+		t.Fatal(err)
+	}
+	run(true, legacyScript, "--update")
+	run(true, returnScript, "uninstall")
+	if _, err := os.Stat(returnDir); !os.IsNotExist(err) {
+		t.Fatalf("return instance still exists after uninstall: %v", err)
+	}
+	if _, err := os.Stat(script); err != nil {
+		t.Fatalf("return runner uninstall affected the probe instance: %v", err)
+	}
 }

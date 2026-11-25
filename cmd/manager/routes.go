@@ -439,10 +439,18 @@ func (s *server) returnInstallCommand(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input, 4096) {
 		return
 	}
-	proxy, valid := normalizeGHProxy(input.Proxy)
-	if !valid || !s.cfg.cookieSecure {
-		writeError(w, http.StatusBadRequest, "target deployment requires HTTPS and a valid proxy")
+	if !s.cfg.cookieSecure {
+		writeError(w, http.StatusServiceUnavailable, "请将管理端的 PUBLIC_URL 配置为 HTTPS 地址。")
 		return
+	}
+	var proxy string
+	if input.Proxy != "" {
+		var valid bool
+		proxy, valid = normalizeGHProxy(input.Proxy)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "请输入有效的 gh-proxy HTTPS 地址。可包含端口或路径前缀。")
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -468,8 +476,7 @@ func (s *server) returnInstallCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	command := buildInstallCommand("", s.cfg.publicURL, runner.ID, token, proxy)
-	command = strings.Replace(command, "main/install.sh", "main/install-return.sh", 1)
+	command := buildInstallCommandFrom(mainReturnInstallerURL, "", s.cfg.publicURL, runner.ID, token, proxy)
 	writeJSON(w, http.StatusOK, map[string]any{"command": command, "expires_at": runner.TokenExpiry})
 }
 

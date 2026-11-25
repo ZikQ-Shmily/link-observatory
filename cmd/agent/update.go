@@ -17,6 +17,7 @@ import (
 
 const (
 	localInstaller        = "./install.sh"
+	returnInstaller       = "./install-return.sh"
 	updateAttemptFile     = "update-attempt.json"
 	updateInstallerMarker = "# Link Observatory managed updates v1."
 )
@@ -26,13 +27,23 @@ type updateAttempt struct {
 	Failed bool
 }
 
-func hasUpdateInstaller() bool {
-	info, err := os.Lstat(localInstaller)
+func selectUpdateInstaller(nodeID string) string {
+	if strings.HasPrefix(nodeID, "return-") && hasUpdateInstaller(returnInstaller) {
+		return returnInstaller
+	}
+	if hasUpdateInstaller(localInstaller) {
+		return localInstaller
+	}
+	return ""
+}
+
+func hasUpdateInstaller(installer string) bool {
+	info, err := os.Lstat(installer)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 ||
 		!ownedByCurrentUser(info) {
 		return false
 	}
-	file, err := os.Open(localInstaller)
+	file, err := os.Open(installer)
 	if err != nil {
 		return false
 	}
@@ -52,7 +63,7 @@ func runManagedUpdates(ctx context.Context, state credentials) {
 			log.Printf("read managed update attempt: %v", err)
 			return
 		}
-		poll := protocol.UpdatePoll{Ready: hasUpdateInstaller(), Version: version}
+		poll := protocol.UpdatePoll{Ready: selectUpdateInstaller(state.NodeID) != "", Version: version}
 		if attempt.Failed && protocol.ValidUpdateID(attempt.ID) {
 			poll.FailedID = attempt.ID
 		}
@@ -63,7 +74,7 @@ func runManagedUpdates(ctx context.Context, state credentials) {
 		}
 		if err == nil && ctx.Err() == nil && poll.Ready && offer != nil && offer.Valid() &&
 			offer.ID != attempt.ID && protocol.NewerVersion(offer.Version, version) {
-			if err := startManagedUpdate(*offer); err != nil {
+			if err := startManagedUpdate(state.NodeID, *offer); err != nil {
 				log.Printf("start managed update: %v", err)
 			}
 		}
@@ -75,9 +86,13 @@ func runManagedUpdates(ctx context.Context, state credentials) {
 	}
 }
 
-func startManagedUpdate(offer protocol.UpdateOffer) error {
+func startManagedUpdate(nodeID string, offer protocol.UpdateOffer) error {
 	if !offer.Valid() {
 		return errors.New("invalid managed update offer")
+	}
+	installer := selectUpdateInstaller(nodeID)
+	if installer == "" {
+		return errors.New("no compatible local installer")
 	}
 	// Persist the attempt before starting the installer to deduplicate polls
 	// and process restarts. The installer can outlive this agent's shutdown.
@@ -94,10 +109,10 @@ func startManagedUpdate(offer protocol.UpdateOffer) error {
 		return err
 	}
 	defer logFile.Close()
-	const wrapper = "if /bin/bash ./install.sh --update --managed-version \"$1\" --installer-sha256 \"$2\"; then exit 0; fi\n" +
+	const wrapper = "if /bin/bash \"$1\" --update --managed-version \"$2\" --installer-sha256 \"$3\"; then exit 0; fi\n" +
 		"umask 077\nfile=$(mktemp .update-attempt.XXXXXXXX) || exit 1\n" +
-		"printf '{\"ID\":\"%s\",\"Failed\":true}\\n' \"$3\" > \"$file\" && mv -f -- \"$file\" update-attempt.json\n"
-	command := exec.Command("/bin/bash", "-c", wrapper, "link-observatory-update", offer.Version, offer.InstallerSHA256, offer.ID)
+		"printf '{\"ID\":\"%s\",\"Failed\":true}\\n' \"$4\" > \"$file\" && mv -f -- \"$file\" update-attempt.json\n"
+	command := exec.Command("/bin/bash", "-c", wrapper, "link-observatory-update", installer, offer.Version, offer.InstallerSHA256, offer.ID)
 	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	command.Stdout, command.Stderr = logFile, logFile
 	if err := command.Start(); err != nil {

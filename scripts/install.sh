@@ -23,7 +23,8 @@ usage() {
         '查看状态：/path/to/node/install.sh --status' \
         '下载方式：--gh-proxy HTTPS_URL 通过自定义代理下载，--gh-proxy "" 改为直连。' \
         '直接卸载：/path/to/node/install.sh uninstall' \
-        'root 节点：/opt/link-observatory/install.sh（多节点时添加 --node NODE_ID）'
+        'root 探针：/opt/link-observatory/install.sh（多节点时添加 --node NODE_ID）' \
+        'root 回程端：/opt/link-observatory/install-return.sh（多回程端时添加 --node NODE_ID）'
 }
 
 need() {
@@ -97,7 +98,7 @@ check_node() {
     local dir=$1
     check_directories "$dir"
     if [[ $system_install == true ]]; then
-        check_root_files "$dir/link-probe" "$dir/settings" "$dir/install.sh" "$dir/agent.log" \
+        check_root_files "$dir/link-probe" "$dir/settings" "$dir/install.sh" "$dir/install-return.sh" "$dir/agent.log" \
             "$dir/credentials.json" "$dir/reports.json" "$dir/run.lock" "$dir/nexttrace" "$dir/route-program"
     fi
 }
@@ -156,7 +157,7 @@ clean_stage() {
         agent="$node_dir/link-probe"
     fi
     if [[ $migration_was_running == true ]]; then
-        start_node || printf '节点保存在 %s，可运行该目录中的 install.sh 恢复。\n' "$node_dir" >&2
+        start_node || printf '节点保存在 %s，可运行该目录中的安装脚本恢复。\n' "$node_dir" >&2
     fi
 }
 
@@ -199,7 +200,8 @@ find_installed_node() {
     local dir candidate=
     for dir in "$nodes_dir"/*; do
         [[ -d $dir && ! -L $dir && -f $dir/settings ]] || continue
-        [[ -z $candidate ]] || fail '已安装多个节点，请添加 --node NODE_ID'
+        [[ $script_name != install-return.sh || ${dir##*/} == return-* ]] || continue
+        [[ -z $candidate ]] || fail '找到多个实例，请添加 --node NODE_ID'
         candidate=${dir##*/}
     done
     [[ -n $candidate ]] || fail '当前账号下没有已安装的节点'
@@ -222,8 +224,8 @@ migrate_legacy_node() {
     migration_stage=$(mktemp -d "$nodes_dir/.migrate-$node.XXXXXXXX")
     cp -a -- "$legacy_node_dir/." "$migration_stage/" || fail '复制旧节点失败，已保留原安装'
     rm -f -- "$migration_stage/run.sock"
-    cp -- "$script_path" "$migration_stage/install.sh"
-    chmod 700 "$migration_stage/install.sh"
+    cp -- "$script_path" "$migration_stage/$installer_name"
+    chmod 700 "$migration_stage/$installer_name"
     migration_archive=$(mktemp -d "$legacy_nodes_dir/.migrate-$node.XXXXXXXX")
     mv -T -- "$legacy_node_dir" "$migration_archive/original" || fail '无法移动旧节点，已保留原安装'
     mv -T -- "$migration_stage" "$node_dir" || fail '无法启用新节点目录，正在恢复原安装'
@@ -234,10 +236,10 @@ migrate_legacy_node() {
 
 install_launcher() {
     [[ $system_install == true ]] || return 0
-    launcher_temp=$(mktemp "$app_dir/.install.sh.XXXXXXXX")
+    launcher_temp=$(mktemp "$app_dir/.$installer_name.XXXXXXXX")
     cp -- "$script_path" "$launcher_temp"
     chmod 700 "$launcher_temp"
-    mv -fT -- "$launcher_temp" "$app_dir/install.sh"
+    mv -fT -- "$launcher_temp" "$app_dir/$installer_name"
     launcher_temp=
 }
 
@@ -266,11 +268,11 @@ registered() {
 print_node_commands() {
     printf '使用安装本节点的同一账号执行以下命令。\n'
     if [[ $system_install == true ]]; then
-        printf '节点管理：%q --node %q\n' "$app_dir/install.sh" "$node"
-        printf '一键卸载：%q --node %q uninstall\n' "$app_dir/install.sh" "$node"
+        printf '节点管理：%q --node %q\n' "$app_dir/$installer_name" "$node"
+        printf '一键卸载：%q --node %q uninstall\n' "$app_dir/$installer_name" "$node"
     else
-        printf '节点管理：bash %q\n' "$node_dir/install.sh"
-        printf '一键卸载：%q uninstall\n' "$node_dir/install.sh"
+        printf '节点管理：bash %q\n' "$node_dir/$installer_name"
+        printf '一键卸载：%q uninstall\n' "$node_dir/$installer_name"
     fi
 }
 
@@ -324,7 +326,7 @@ prepare_nexttrace() {
     fi
     rm -f -- "$candidate"
     : > "$stage_dir/route-program"
-    printf 'NextTrace 下载失败。路由追踪暂不可用，可重新运行本地 install.sh 更新。\n' >&2
+    printf 'NextTrace 下载失败。路由追踪暂不可用，可运行本地 %s 更新。\n' "$installer_name" >&2
 }
 
 install_node() {
@@ -346,8 +348,8 @@ install_node() {
     stage_dir=$(mktemp -d "$nodes_dir/.install-$node.XXXXXXXX")
     download "$(release_asset "$release" "$artifact")" "$stage_dir/$artifact" || fail "无法下载安装文件：$artifact"
     verify "$artifact" "$expected"
-    cp -- "$script_path" "$stage_dir/install.sh"
-    chmod 700 "$stage_dir/$artifact" "$stage_dir/install.sh"
+    cp -- "$script_path" "$stage_dir/$installer_name"
+    chmod 700 "$stage_dir/$artifact" "$stage_dir/$installer_name"
     mv -- "$stage_dir/$artifact" "$stage_dir/link-probe"
     prepare_nexttrace "$artifact"
     printf '%s\n' "$manager" "$release" "$gh_proxy" > "$stage_dir/settings"
@@ -373,7 +375,7 @@ install_node() {
     fi
 
     if [[ $action != update ]] && ! registered; then
-        register_node || fail '注册未完成，重新运行本地 install.sh 可继续安装'
+        register_node || fail "注册未完成，重新运行本地 $installer_name 可继续安装"
     fi
     if ! start_node; then
         if [[ -n $stage_dir && -f $stage_dir/previous-probe ]] && stop_node; then
@@ -385,7 +387,7 @@ install_node() {
         fail '启动未完成'
     fi
     if [[ -n $stage_dir ]]; then
-        mv -- "$stage_dir/install.sh" "$node_dir/install.sh"
+        mv -- "$stage_dir/$installer_name" "$node_dir/$installer_name"
         mv -- "$stage_dir/settings" "$node_dir/settings"
         if [[ -f $stage_dir/nexttrace ]]; then
             mv -f -- "$stage_dir/nexttrace" "$node_dir/nexttrace"
@@ -536,11 +538,6 @@ if (( EUID == 0 )); then
     app_dir=/opt/link-observatory
     nodes_dir="$app_dir/nodes"
     check_directories /opt "$app_dir" "$nodes_dir"
-    check_root_files "$app_dir/install.sh"
-    if [[ -f $app_dir/install.sh ]]; then
-        grep -Fxq '# Link Observatory managed node installer.' "$app_dir/install.sh" ||
-            fail '管理入口已存在且归属未确认，未覆盖该文件'
-    fi
     if [[ -z $user_home || $user_home == / || ! -O $user_home ]]; then
         user_home=$(cd -- ~root 2>/dev/null && pwd -P) || user_home=
     fi
@@ -554,7 +551,8 @@ else
 fi
 script_path=${BASH_SOURCE[0]}
 script_dir=$(cd -- "$(dirname -- "$script_path")" && pwd -P)
-script_path="$script_dir/${script_path##*/}"
+script_name=${script_path##*/}
+script_path="$script_dir/$script_name"
 if [[ -z $node && ${script_dir%/*} == "$nodes_dir" ]]; then
     node=${script_dir##*/}
 fi
@@ -597,6 +595,19 @@ if [[ -z $node ]]; then
     find_installed_node
     validate_node "$node"
 fi
+installer_name=install.sh
+if [[ $node == return-* ]]; then
+    installer_name=install-return.sh
+elif [[ $script_name == install-return.sh ]]; then
+    fail 'install-return.sh 用于管理回程端，请选择 return- 开头的实例'
+fi
+if [[ $system_install == true ]]; then
+    check_root_files "$app_dir/$installer_name"
+    if [[ -f $app_dir/$installer_name ]]; then
+        grep -Fxq '# Link Observatory managed node installer.' "$app_dir/$installer_name" ||
+            fail '管理入口已存在且归属未确认，未覆盖该文件'
+    fi
+fi
 node_dir="$nodes_dir/$node"
 agent="$node_dir/link-probe"
 check_node "$node_dir"
@@ -638,7 +649,7 @@ elif [[ -f $node_dir/settings ]]; then
         exit 0
     fi
     if [[ $token_supplied == true ]]; then
-        if [[ $release != "$saved_release" || $gh_proxy != "$saved_proxy" || ! -x $agent ]]; then
+        if [[ $release != "$saved_release" || $gh_proxy != "$saved_proxy" || ! -x $agent || ! -x $node_dir/$installer_name ]]; then
             install_node
         else
             if ! "$agent" status --dir "$node_dir" >/dev/null 2>&1; then

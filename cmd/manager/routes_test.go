@@ -139,3 +139,55 @@ func TestReturnRunnerOnlyReceivesItsTargetAndPublicEgress(t *testing.T) {
 		t.Fatalf("route result was not persisted: %v", err)
 	}
 }
+
+func TestReturnInstallCommandAllowsDirectDownload(t *testing.T) {
+	const id, endpoint = "target-a", "/api/admin/targets/target-a/return-command"
+	const proxy = "https://proxy.example.com/main/install.sh"
+	s := newPasswordTestServer(t)
+	s.state.Targets[id] = targetRecord{Target: protocol.Target{ID: id, Name: "Test target"}}
+	s.sessions["admin"] = time.Now().Add(time.Hour)
+	cookie := s.cookie("admin", 60)
+	handler := s.routes()
+	generate := func(proxy string, want int) *httptest.ResponseRecorder {
+		t.Helper()
+		w := passwordRequest(handler, http.MethodPost, endpoint, s.cfg.publicURL, cookie, map[string]string{"gh_proxy": proxy})
+		passwordStatus(t, w, want)
+		return w
+	}
+	readCommand := func(w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var response struct{ Command string }
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Command
+	}
+
+	generate("http://proxy.example.com", http.StatusBadRequest)
+	if s.state.Targets[id].ReturnRunner != "" {
+		t.Fatal("invalid proxy created a return runner")
+	}
+	direct := readCommand(generate("", http.StatusOK))
+	runnerID := s.state.Targets[id].ReturnRunner
+	if !strings.Contains(direct, shellQuote(mainReturnInstallerURL)) || strings.Contains(direct, "--gh-proxy") ||
+		!strings.Contains(direct, "--node "+shellQuote(runnerID)) || !strings.Contains(direct, "--token") {
+		t.Fatalf("unexpected direct command: %s", direct)
+	}
+
+	proxied := readCommand(generate(proxy+"/", http.StatusOK))
+	if !strings.Contains(proxied, shellQuote(proxy+"/"+mainReturnInstallerURL)) ||
+		!strings.Contains(proxied, "--gh-proxy "+shellQuote(proxy)) {
+		t.Fatalf("proxy path was not preserved: %s", proxied)
+	}
+
+	runner := s.state.RouteRunners[runnerID]
+	runner.Credential = digest("test-credential")
+	s.state.setAgent(runner)
+	update := readCommand(generate("", http.StatusOK))
+	if strings.Contains(update, "--token") || !strings.Contains(update, "--update") {
+		t.Fatalf("registered runner received an enrollment command: %s", update)
+	}
+
+	s.cfg.publicURL, s.cfg.cookieSecure = "http://localhost", false
+	generate("", http.StatusServiceUnavailable)
+}

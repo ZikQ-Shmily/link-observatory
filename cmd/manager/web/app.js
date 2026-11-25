@@ -534,6 +534,7 @@ function showEnrollment(enrollment) {
 function showInstallDialog(node, token = "", subtitle = node.name, back = false, update = false) {
   const installing = back ? !update : Boolean(token);
   const host = back ? "目标主机" : "探针主机";
+  const localScript = back ? "install-return.sh" : "install.sh";
   openDialog(back ? (update ? "更新回程端" : "部署回程端") : (installing ? "安装并注册" : "更新探针"), subtitle,
     '<form data-install-form><div class="form-fields">' +
     '<label class="check-field"><input type="checkbox" name="use_proxy"><span>使用 gh-proxy（GitHub 网络受限）</span></label>' +
@@ -541,7 +542,7 @@ function showInstallDialog(node, token = "", subtitle = node.name, back = false,
     'placeholder="https://gh-proxy.example.com" autocomplete="off" spellcheck="false" disabled required></label>' +
     '<label>' + (installing ? '一键安装命令' : '一键更新命令') +
     '<textarea readonly spellcheck="false" rows="7" class="short-command" data-field="install"></textarea></label>' +
-    '<p class="subtle">' + (installing ? "在" + host + "运行。安装后会保留本地 install.sh。" : "在" + host + "上用安装时的账号运行。") + '</p>' +
+    '<p class="subtle">' + (installing ? "在" + host + "运行。安装后会保留本地 " + localScript + "。" : "在" + host + "上用安装时的账号运行。") + '</p>' +
     '<p class="form-message" role="alert" data-error></p></div><div class="dialog-actions">' +
     '<span role="status" class="subtle" data-feedback></span><button type="submit" class="action">生成命令</button>' +
     action(installing ? "复制安装命令" : "复制更新命令", "copy", "install", true) +
@@ -624,7 +625,7 @@ function showUpdateDialog(item, back = false) {
   const busy = task?.status === "queued" || task?.status === "running";
   const title = back ? "更新回程端" : "更新探针";
   const help = supported ? "在主机上安装配置的发行版。更新完成后程序会自动重启。" :
-    "请先在主机上用 install.sh 升级到 v2.1.0 或更新版本。";
+    "请先在主机上运行手动更新命令，升级到支持后台更新的版本。";
   const manual = action("手动更新命令", back ? "return-update" : "update-command", item.id);
   openDialog(title, item.name,
     '<form data-form="' + (back ? "queue-return-update" : "queue-node-update") +
@@ -652,7 +653,7 @@ function routeSettingsDialog(target) {
 function removeReturnDialog(target) {
   openDialog("解绑回程端", target.name,
     '<form data-form="return-remove" data-id="' + escape(target.id) + '">' +
-    '<p>解绑会吊销该回程端的凭证。在目标主机上运行本地 install.sh 可卸载回程端。</p>' +
+    '<p>解绑会吊销该回程端的凭证。在目标主机上运行本地 install-return.sh uninstall 可卸载回程端。</p>' +
     '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' +
     action("取消", "close") + '<button type="submit" class="action primary">确认解绑</button></div></form>');
 }

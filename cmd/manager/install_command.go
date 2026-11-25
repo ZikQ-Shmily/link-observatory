@@ -15,6 +15,7 @@ import (
 
 const (
 	mainInstallerURL          = "https://raw.githubusercontent.com/" + installerRepo + "/refs/heads/main/install.sh"
+	mainReturnInstallerURL    = "https://raw.githubusercontent.com/" + installerRepo + "/refs/heads/main/install-return.sh"
 	firstProxyInstallerPatch  = 10
 	firstStreamInstallerPatch = 11
 )
@@ -129,7 +130,10 @@ func (s *server) nodeInstallCommand(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildInstallCommand(releaseURL, manager, id, token, proxy string) string {
-	downloadURL := mainInstallerURL
+	return buildInstallCommandFrom(mainInstallerURL, releaseURL, manager, id, token, proxy)
+}
+
+func buildInstallCommandFrom(downloadURL, releaseURL, manager, id, token, proxy string) string {
 	if releaseURL != "" {
 		downloadURL = releaseURL + "/install.sh"
 	}

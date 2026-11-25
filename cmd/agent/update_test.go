@@ -11,18 +11,12 @@ import (
 
 func TestManagedUpdateUsesVerifiedLocalInstallerAndRecordsFailure(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if hasUpdateInstaller() {
-		t.Fatal("missing installer advertised as update capable")
-	}
 	script := "#!/bin/bash\n" + updateInstallerMarker + "\nprintf '%s\\n' \"$@\"\nexit 1\n"
-	if err := os.WriteFile(localInstaller, []byte(script), 0700); err != nil {
+	if err := os.WriteFile(returnInstaller, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if !hasUpdateInstaller() {
-		t.Fatal("valid local installer was not detected")
-	}
 	offer := protocol.UpdateOffer{ID: strings.Repeat("a", 32), Version: "v2.2.0", InstallerSHA256: strings.Repeat("b", 64)}
-	if err := startManagedUpdate(offer); err != nil {
+	if err := startManagedUpdate("return-test", offer); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
@@ -37,4 +31,41 @@ func TestManagedUpdateUsesVerifiedLocalInstallerAndRecordsFailure(t *testing.T) 
 		}
 	}
 	t.Fatal("failed installer result was not saved")
+}
+
+func TestSelectUpdateInstallerByNodeRole(t *testing.T) {
+	t.Chdir(t.TempDir())
+	script := []byte("#!/bin/bash\n" + updateInstallerMarker + "\n")
+	write := func(path string, contents []byte) {
+		t.Helper()
+		if err := os.WriteFile(path, contents, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(node, want string) {
+		t.Helper()
+		if got := selectUpdateInstaller(node); got != want {
+			t.Errorf("installer for %s = %q, want %q", node, got, want)
+		}
+	}
+
+	check("return-test", "")
+	write(returnInstaller, script)
+	check("return-test", returnInstaller)
+	check("probe-test", "")
+
+	write(localInstaller, script)
+	check("return-test", returnInstaller)
+	check("probe-test", localInstaller)
+
+	write(returnInstaller, []byte("#!/bin/bash\n"))
+	check("return-test", localInstaller)
+	if err := os.Remove(returnInstaller); err != nil {
+		t.Fatal(err)
+	}
+	check("return-test", localInstaller)
+	if err := os.Symlink(localInstaller, returnInstaller); err != nil {
+		t.Fatal(err)
+	}
+	check("return-test", localInstaller)
 }
