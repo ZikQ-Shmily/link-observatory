@@ -45,6 +45,9 @@ func TestInstalledScriptKeepsProxyForUpdatesAndReportsStatus(t *testing.T) {
 	}
 	trace := filepath.Join(home, "downloads")
 	write(filepath.Join(bin, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Linux ;; -m) echo x86_64 ;; *) exit 2 ;; esac\n", 0700)
+	write(filepath.Join(bin, "timeout"), "#!/bin/sh\nshift\nexec \"$@\"\n", 0700)
+	write(filepath.Join(bin, "nexttrace"), "#!/bin/sh\nexit 1\n", 0700)
+	write(filepath.Join(bin, "nexttrace-tiny"), "#!/bin/sh\necho --json\n", 0700)
 	write(filepath.Join(bin, "flock"), "#!/bin/sh\nexit 0\n", 0700)
 	write(filepath.Join(bin, "curl"), `#!/bin/sh
 if [ "$#" -eq 4 ] && [ "$1" = -fsSL ]; then
@@ -69,12 +72,12 @@ cp "$HOME/$file" "$2"
 	t.Setenv("TMPDIR", home)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	const (
-		manager = "https://monitor.example.com"
-		proxy   = "https://proxy.example.com/cache"
-		initial = officialReleaseDownloadPrefix + "v0.1.11"
-		update  = officialReleaseDownloadPrefix + "v0.1.12"
-		latest  = "https://github.com/" + installerRepo + "/releases/latest/download/install.sh"
-		tiny    = "https://github.com/nxtrace/NTrace-core/releases/download/v1.7.6/nexttrace-tiny_linux_amd64"
+		manager   = "https://monitor.example.com"
+		proxy     = "https://proxy.example.com/cache"
+		initial   = officialReleaseDownloadPrefix + "v0.1.11"
+		update    = officialReleaseDownloadPrefix + "v0.1.12"
+		latest    = "https://github.com/" + installerRepo + "/releases/latest/download/install.sh"
+		nextTrace = "https://github.com/nxtrace/NTrace-core/releases/download/v1.7.6/nexttrace_linux_amd64"
 	)
 	t.Setenv("TEST_TRACE", trace)
 	t.Setenv("TEST_MANAGER", manager)
@@ -170,12 +173,31 @@ esac
 	}
 	want := []string{
 		proxy + "/" + mainInstallerURL, proxy + "/" + latest,
-		proxy + "/" + mainInstallerURL, proxy + "/" + latest, proxy + "/" + initial + "/link-probe-linux-amd64", proxy + "/" + tiny,
+		proxy + "/" + mainInstallerURL, proxy + "/" + latest, proxy + "/" + initial + "/link-probe-linux-amd64", proxy + "/" + nextTrace,
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
-		proxy + "/" + update + "/link-probe-linux-amd64", proxy + "/" + tiny,
+		proxy + "/" + update + "/link-probe-linux-amd64", proxy + "/" + nextTrace,
 	}
 	if downloads := strings.Split(strings.TrimSpace(read(trace)), "\n"); !slices.Equal(downloads, want) {
 		t.Fatalf("unexpected download routes: %v", downloads)
+	}
+	// A compatible system copy takes priority and the previously managed Tiny
+	// copy is removed only after the completed upgrade.
+	systemNextTrace := filepath.Join(bin, "nexttrace")
+	write(systemNextTrace, "#!/bin/sh\necho --json\n", 0700)
+	legacy := filepath.Join(node, "nexttrace-tiny")
+	write(legacy, "#!/bin/sh\n", 0700)
+	before = read(trace)
+	run(true, script, "--update")
+	newDownloads := strings.Split(strings.TrimSpace(strings.TrimPrefix(read(trace), before)), "\n")
+	if slices.Contains(newDownloads, proxy+"/"+nextTrace) {
+		t.Fatalf("downloaded NextTrace despite a compatible local installation: %v", newDownloads)
+	}
+	resolved, err := filepath.EvalSymlinks(systemNextTrace)
+	if err != nil || strings.TrimSpace(read(filepath.Join(node, "route-program"))) != resolved {
+		t.Fatalf("existing NextTrace was not selected: %v", err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("managed Tiny copy was not removed: %v", err)
 	}
 }

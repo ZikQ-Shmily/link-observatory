@@ -97,7 +97,7 @@ check_node() {
     check_directories "$dir"
     if [[ $system_install == true ]]; then
         check_root_files "$dir/link-probe" "$dir/settings" "$dir/install.sh" "$dir/agent.log" \
-            "$dir/credentials.json" "$dir/reports.json" "$dir/run.lock" "$dir/nexttrace-tiny" "$dir/route-program"
+            "$dir/credentials.json" "$dir/reports.json" "$dir/run.lock" "$dir/nexttrace" "$dir/route-program"
     fi
 }
 
@@ -291,37 +291,35 @@ usable_nexttrace() {
 }
 
 prepare_nexttrace() {
-    local name candidate asset expected base
-    for name in nexttrace nexttrace-tiny; do
-        candidate=$(command -v "$name") || continue
-        candidate=$(realpath -e -- "$candidate") || continue
-        if usable_nexttrace "$candidate"; then
-            printf '%s\n' "$candidate" > "$stage_dir/route-program"
-            printf '复用本机 NextTrace：%s\n' "$candidate"
-            return
-        fi
-    done
+    local candidate asset expected base
+    if candidate=$(command -v nexttrace) &&
+        candidate=$(realpath "$candidate") &&
+        usable_nexttrace "$candidate"; then
+        printf '%s\n' "$candidate" > "$stage_dir/route-program"
+        printf '复用本机 NextTrace：%s\n' "$candidate"
+        return
+    fi
 
     base=https://github.com/nxtrace/NTrace-core/releases/download/v1.7.6
     case "$1" in
         link-probe-linux-amd64)
-            asset=nexttrace-tiny_linux_amd64
-            expected=9f219ba91318a3e1534bd28c661ef8019da42825ed48257035c508962d007271 ;;
+            asset=nexttrace_linux_amd64
+            expected=3868c8190c961b534b8f2d0ed528796fc48d46a818ee5268fe2dfc6aa44b3a5e ;;
         link-probe-linux-arm64)
-            asset=nexttrace-tiny_linux_arm64
-            expected=aeab456e2f8aebd62cd1dd2d6458d2ec57b38f5d707e196bab41f999ff898810 ;;
+            asset=nexttrace_linux_arm64
+            expected=e4c4e818f6cebf8d8ee3df3976a304c8bac2bb3bea3160a23fd5bce18095c9e6 ;;
     esac
-    if [[ -x $node_dir/nexttrace-tiny ]] &&
-        printf '%s  %s\n' "$expected" "$node_dir/nexttrace-tiny" | sha256sum -c --status -; then
-        printf '%s\n' "$node_dir/nexttrace-tiny" > "$stage_dir/route-program"
+    if [[ -x $node_dir/nexttrace ]] &&
+        printf '%s  %s\n' "$expected" "$node_dir/nexttrace" | sha256sum -c --status -; then
+        printf '%s\n' "$node_dir/nexttrace" > "$stage_dir/route-program"
         return
     fi
-    printf '正在下载 NextTrace Tiny。\n'
-    candidate="$stage_dir/nexttrace-tiny"
+    printf '正在下载完整版 NextTrace。\n'
+    candidate="$stage_dir/nexttrace"
     if download "$(release_asset "$base" "$asset")" "$candidate" &&
         printf '%s  %s\n' "$expected" "$candidate" | sha256sum -c --status - &&
         chmod 700 "$candidate"; then
-        printf '%s\n' "$node_dir/nexttrace-tiny" > "$stage_dir/route-program"
+        printf '%s\n' "$node_dir/nexttrace" > "$stage_dir/route-program"
         return
     fi
     rm -f -- "$candidate"
@@ -391,11 +389,14 @@ install_node() {
     if [[ -n $stage_dir ]]; then
         mv -- "$stage_dir/install.sh" "$node_dir/install.sh"
         mv -- "$stage_dir/settings" "$node_dir/settings"
-        if [[ -f $stage_dir/nexttrace-tiny ]]; then
-            mv -fT -- "$stage_dir/nexttrace-tiny" "$node_dir/nexttrace-tiny"
+        if [[ -f $stage_dir/nexttrace ]]; then
+            mv -f -- "$stage_dir/nexttrace" "$node_dir/nexttrace"
         fi
         if [[ -f $stage_dir/route-program ]]; then
-            mv -fT -- "$stage_dir/route-program" "$node_dir/route-program"
+            mv -f -- "$stage_dir/route-program" "$node_dir/route-program"
+            if [[ -s $node_dir/route-program ]]; then
+                rm -f -- "$node_dir/nexttrace-tiny"
+            fi
         fi
         install_launcher
     fi
