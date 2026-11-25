@@ -510,3 +510,6 @@ body { margin: 0; background: #fdfdfd; }
 #ip-monitor-console .route-changes dd { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 
 #ip-monitor-console .update-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; }
+
+#ip-monitor-console .route-interval-options { row-gap: 4px; }
+#ip-monitor-console .route-interval-options span { min-height: 42px; }

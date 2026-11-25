@@ -141,6 +141,7 @@ const (
 )
 
 type RoutePoll struct {
+	Manual  bool   `json:"manual,omitempty"`
 	Busy    bool   `json:"busy,omitempty"`
 	Ready   bool   `json:"ready"`
 	Sampled bool   `json:"sampled"`
@@ -149,6 +150,7 @@ type RoutePoll struct {
 }
 
 type RouteJob struct {
+	ManualID   string `json:"manual_id,omitempty"`
 	SourceIP   string `json:"source_ip,omitempty"`
 	TargetID   string `json:"target_id"`
 	Generation string `json:"generation"`

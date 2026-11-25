@@ -40,6 +40,7 @@ type nodeRecord struct {
 	TokenExpiry      int64         `json:"token_expiry,omitempty"`
 	Credential       string        `json:"credential,omitempty"`
 	ReturnTarget     string        `json:"return_target,omitempty"`
+	ManualRoutes     bool          `json:"manual_routes,omitempty"`
 	RouteReady       bool          `json:"route_ready,omitempty"`
 	Egress4          egressAddress `json:"egress_v4,omitzero"`
 	Egress6          egressAddress `json:"egress_v6,omitzero"`
@@ -66,6 +67,7 @@ type targetRecord struct {
 	ICMPAlert         protocolAlertState `json:"icmp_alert,omitzero"`
 	CandidateStatus   string             `json:"candidate_status,omitempty"`
 	Route             routeSettings      `json:"route,omitzero"`
+	ManualTrace       manualRouteRound   `json:"manual_trace,omitzero"`
 	ReturnRunner      string             `json:"return_runner,omitempty"`
 }
 
@@ -123,6 +125,7 @@ type diskState struct {
 	ScheduleStart        int64                              `json:"schedule_start,omitempty"`
 	RouteRunners         map[string]nodeRecord              `json:"route_runners,omitempty"`
 	Routes               map[string]routeSeries             `json:"routes,omitempty"`
+	ManualResults        map[string]manualRouteResult       `json:"manual_results,omitempty"`
 	RouteChanges         []routeChange                      `json:"route_changes,omitempty"`
 	EgressChanges        []egressChange                     `json:"egress_changes,omitempty"`
 }

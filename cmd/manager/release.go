@@ -34,6 +34,29 @@ type installerRelease struct {
 	validUntil time.Time
 }
 
+func (release installerRelease) officialTag() string {
+	tag, official := strings.CutPrefix(release.URL, officialReleaseDownloadPrefix)
+	if !official || len(tag) > 64 || !stableInstallerTag.MatchString(tag) {
+		return ""
+	}
+	return tag
+}
+
+func (s *server) probeVersions(ctx context.Context) (latest, available string) {
+	if s.resolveLatestInstaller != nil {
+		if release, err := s.resolveLatestInstaller(ctx); err == nil && time.Now().Before(release.validUntil) {
+			latest = release.officialTag()
+		}
+	}
+	if s.cfg.releaseConfigured() {
+		available = latest
+		if s.cfg.releaseURL != "" {
+			available = (installerRelease{URL: s.cfg.releaseURL}).officialTag()
+		}
+	}
+	return latest, available
+}
+
 type latestInstaller struct {
 	client   *http.Client
 	endpoint string

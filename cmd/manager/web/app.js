@@ -252,6 +252,17 @@ function routeChanges(data) {
     "<tr><td>" + escape(change.label) + "</td>" + cell("探针", escape(change.probe)) +
     cell("变化", change.detail) + cell("时间", escape(routeTime(change.at))) + "</tr>"), "route-table");
 }
+function routeInterval(minutes) {
+  return minutes >= 60 ? (minutes / 60) + " 小时" : minutes + " 分钟";
+}
+function manualRouteStatus(run) {
+  if (!run) return "";
+  const marks = { running: ["warn", "正在追踪"], completed: ["ok", "手动追踪完成"], expired: ["warn", "手动追踪超时"] };
+  const mark = marks[run.state];
+  if (!mark) return "";
+  return '<div class="update-feedback" role="status">' + badge(mark) +
+    '<span class="subtle">' + escape(run.done + "/" + run.total) + "</span></div>";
+}
 function routePanel(target) {
   const data = routeView.data;
   if (!data) {
@@ -259,15 +270,19 @@ function routePanel(target) {
   }
   if (routeView.panel === "changes") return routeChanges(data);
   const status = { pending: ["quiet", "未部署"], offline: ["quiet", "离线"], unavailable: ["warn", "NextTrace 不可用"], online: ["ok", "在线"] };
-  const runnerVersion = data.runner_version ? '<span class="target-address">版本 ' + escape(data.runner_version) + '</span>' : "";
+  const startTrace = action("立即追踪", "trace-now", target.id, true);
+  const traceControl = data.manual?.state === "running" ? startTrace.replace(' type="button"', ' type="button" disabled') : startTrace;
+  const runnerVersion = data.runner_version ? '<code class="target-address">版本 ' +
+    agentVersion(data.runner_version, data.latest_probe_version) + "</code>" : "";
   const header = '<section class="surface"><div class="section-heading"><div><h2>定时路由追踪</h2><p class="subtle">' +
-    (data.enabled ? "每 " + escape(data.minutes) + " 分钟" : "已关闭") + " · 回程端 " + badge(status[data.runner] ?? status.pending) +
-    '</p>' + runnerVersion + updateStatus(data.runner_update) + '</div><div class="node-actions">' +
+    (data.enabled ? "每 " + escape(routeInterval(data.minutes)) : "已关闭") + " · 回程端 " + badge(status[data.runner] ?? status.pending) +
+    '</p>' + runnerVersion + updateAvailable(data.runner_update_available) + updateStatus(data.runner_update) +
+    manualRouteStatus(data.manual) + '</div><div class="node-actions">' + traceControl +
     action("路由设置", "route-settings", target.id) +
     (data.runner === "pending" ? action("部署回程端", "return-install", target.id) :
       action("更新回程端", "show-return-update", target.id) + action("解绑回程端", "return-remove", target.id, false, true)) +
     "</div></div></section>";
-  if (!data.enabled) return header;
+  if (!data.enabled && !data.manual && !data.routes.length) return header;
   const probe = state.data.nodes.find(node => node.id === routeView.probe) ?? state.data.nodes[0];
   if (!probe) return header + '<p class="empty">请先添加探针节点</p>';
   const { direction, family } = routeView;
@@ -292,7 +307,7 @@ function routePanel(target) {
   return header + filters + '<section class="surface"><div class="section-heading"><div><h2>' +
     (back ? "回程" : "去程") + " · IPv" + family + '</h2><p class="subtle"><code>' + escape(matchingResult?.job.source_ip || from) + " → " +
     escape(to || "等待出口 IP") + '</code></p></div><div>' +
-    (matchingResult ? '<p class="subtle">' + escape(routeTime(matchingResult.job.window)) + " · 北京时间</p>" : "") +
+    (matchingResult ? '<p class="subtle">' + escape(routeTime(matchingResult.job.window)) + " · 北京时间" + (matchingResult.job.manual_id ? " · 手动追踪" : "") + "</p>" : "") +
     (matchingResult && !matchingResult.error ? badge(reached ? ["ok", "已到达目标"] : ["quiet", "未观测到目标回包"]) : "") +
     (lastChange ? action("最近变化 " + routeTime(lastChange.at), "detail-panel", "changes", false, true) : "") +
     "</div></div>" +
@@ -333,14 +348,12 @@ function nodes() {
       (node.icmp_v4 ? "IPv4" : "") + (node.icmp_v4 && node.icmp_v6 ? " / " : "") + (node.icmp_v6 ? "IPv6" : "") || "不可用";
     const deployment = node.state === "pending" ? action("生成注册令牌", "rotate-token", node.id, false, true) :
       state.data.release_configured ? action("更新", "show-node-update", node.id, false, true) : "";
-    const isLatest = node.version && node.version === state.data.latest_probe_version;
-    const version = isLatest ? "latest" : node.version;
     const controls = action("编辑", "edit-node", node.id, false, true) +
       deployment + action("移除节点", "remove-node", node.id, false, true);
     return '<tr><td><div class="reorder-name">' + reorderGrip(node) +
-      '<div><strong>' + escape(node.name) + '</strong><code class="target-address"' +
-      (isLatest ? ' title="' + escape(node.version) + '"' : "") + '>' +
-      escape(node.id + (version ? " · " + version : "")) + "</code>" + updateStatus(node.update) + egressLines(node) + "</div></div></td>" +
+      '<div><strong>' + escape(node.name) + '</strong><code class="target-address">' + escape(node.id) +
+      (node.version ? " · " + agentVersion(node.version, state.data.latest_probe_version) : "") +
+      "</code>" + updateAvailable(node.update_available) + updateStatus(node.update) + egressLines(node) + "</div></div></td>" +
       cell("运营商", escape(node.isp)) + cell("地区", escape(node.location)) +
       cell("分组", node.group === "mainland" ? "大陆观测" : "境外观测") +
       cell("连接", badge(nodeLabels[node.state] ?? nodeLabels.pending)) +
@@ -604,6 +617,12 @@ function showInstallDialog(node, token = "", subtitle = node.name, back = false,
   if (back) resetCommand();
   else void generateCommand();
 }
+function agentVersion(version, latest) {
+  return version === latest ? '<span title="' + escape(version) + '">latest</span>' : escape(version);
+}
+function updateAvailable(available) {
+  return available ? '<div class="update-feedback">' + badge(["warn", "可更新"]) + "</div>" : "";
+}
 const updateStates = {
   queued: ["quiet", "等待节点领取"],
   running: ["warn", "更新中"],
@@ -611,7 +630,8 @@ const updateStates = {
   failed: ["bad", "更新失败"],
   expired: ["warn", "更新超时"]
 };
-function updateStatus(task) {
+function updateStatus(task, showSuccess = false) {
+  if (task?.status === "succeeded" && !showSuccess) return "";
   const appearance = updateStates[task?.status];
   if (!appearance) return "";
   return '<div class="update-feedback">' + badge(appearance) +
@@ -630,7 +650,7 @@ function showUpdateDialog(item, back = false) {
   openDialog(title, item.name,
     '<form data-form="' + (back ? "queue-return-update" : "queue-node-update") +
     '" data-id="' + escape(item.id) + '"><p>' + help + '</p>' +
-    (installed ? '<p class="subtle">当前版本 ' + escape(installed) + '</p>' : '') + updateStatus(task) +
+    (installed ? '<p class="subtle">当前版本 ' + escape(installed) + '</p>' : '') + updateStatus(task, true) +
     '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' + manual +
     (supported && !busy ? '<button type="submit" class="action primary">开始更新</button>' : '') + '</div></form>');
 }
@@ -639,14 +659,14 @@ function routeEndpoint(id, operation = "routes") {
 }
 function routeSettingsDialog(target) {
   const data = routeView.data;
-  const options = [5, 15, 30, 60].map(minutes =>
+  const options = [5, 15, 30, 60, 360, 720, 1440, 2880].map(minutes =>
     '<label><input type="radio" required name="minutes" value="' + minutes + '"' +
-    (minutes === data.minutes ? " checked" : "") + '><span>' + minutes + ' 分钟</span></label>').join("");
+    (minutes === data.minutes ? " checked" : "") + '><span>' + routeInterval(minutes) + '</span></label>').join("");
   openDialog("路由设置", target.name,
     '<form data-form="route-settings" data-id="' + escape(target.id) + '"><div class="form-fields">' +
     '<label class="check-field"><input type="checkbox" name="enabled"' + (data.enabled ? " checked" : "") +
     '><span>启用定时路由追踪</span></label><fieldset class="group-field"><legend>追踪间隔</legend>' +
-    '<div class="group-options">' + options + '</div></fieldset></div>' +
+    '<div class="group-options route-interval-options">' + options + '</div></fieldset></div>' +
     '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' +
     '<button type="submit" class="action primary">保存设置</button></div></form>');
 }
@@ -826,6 +846,14 @@ root.addEventListener("click", async event => {
       const key = action.slice(6);
       routeView[key] = key === "family" ? Number(id) : id;
       render();
+    } else if (action === "trace-now" && target) {
+      button.disabled = true;
+      try {
+        await api(routeEndpoint(id, "routes/trace"), "POST");
+        await loadRoutes(id);
+      } finally {
+        button.disabled = false;
+      }
     } else if (action === "route-settings" && target && routeView.data) routeSettingsDialog(target);
     else if ((action === "return-install" || action === "return-update") && target) {
       showInstallDialog(target, "", target.name, true, action === "return-update");

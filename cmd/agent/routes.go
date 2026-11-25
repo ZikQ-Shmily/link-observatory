@@ -42,9 +42,9 @@ func nextTraceProgram() string {
 }
 
 func egressIP(ctx context.Context, family int) string {
-	endpoint, network := "https://api.ipify.org", "tcp4"
+	endpoint, network := "https://api-ipv4.ip.sb/ip", "tcp4"
 	if family == 6 {
-		endpoint, network = "https://api6.ipify.org", "tcp6"
+		endpoint, network = "https://api-ipv6.ip.sb/ip", "tcp6"
 	}
 	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	transport := &http.Transport{
@@ -59,6 +59,8 @@ func egressIP(ctx context.Context, family int) string {
 	if err != nil {
 		return ""
 	}
+	// IP.SB may block the HTTP client's default User-Agent.
+	req.Header.Set("User-Agent", "Link-Observatory")
 	response, err := client.Do(req)
 	if err != nil {
 		return ""
@@ -96,7 +98,7 @@ func runRoutes(parent context.Context, state credentials) {
 		default:
 		}
 		program := nextTraceProgram()
-		poll := protocol.RoutePoll{Ready: program != "", Busy: jobsDone != nil}
+		poll := protocol.RoutePoll{Ready: program != "", Busy: jobsDone != nil, Manual: true}
 		if time.Since(lastSample) >= heartbeatInterval {
 			poll.Sampled = true
 			var sample sync.WaitGroup

@@ -5,7 +5,6 @@ import (
 	"maps"
 	"net"
 	"net/http"
-	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 )
 
 type nodeView struct {
+	UpdateAvailable  bool        `json:"update_available"`
 	ManagedUpdates   bool        `json:"managed_updates"`
 	Update           *updateView `json:"update,omitempty"`
 	EgressIPv4       string      `json:"egress_ipv4,omitempty"`
@@ -157,10 +157,12 @@ func (s *server) adminState(w http.ResponseWriter, r *http.Request) {
 	for _, node := range state.Nodes {
 		view.Nodes = append(view.Nodes, describeNode(node, now))
 	}
-	if r.URL.Query().Get("probe_version") == "1" && s.resolveLatestInstaller != nil &&
+	if r.URL.Query().Get("probe_version") == "1" &&
 		slices.ContainsFunc(view.Nodes, func(node nodeView) bool { return node.Version != "" }) {
-		if release, err := s.resolveLatestInstaller(r.Context()); err == nil && time.Now().Before(release.validUntil) {
-			view.LatestProbeVersion = path.Base(release.URL)
+		latest, available := s.probeVersions(r.Context())
+		view.LatestProbeVersion = latest
+		for i := range view.Nodes {
+			view.Nodes[i].UpdateAvailable = protocol.NewerVersion(available, view.Nodes[i].Version)
 		}
 	}
 	for _, target := range state.Targets {

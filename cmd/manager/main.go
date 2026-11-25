@@ -208,6 +208,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/targets", s.admin(s.addTarget))
 	mux.HandleFunc("GET /api/admin/targets/{id}/routes", s.admin(s.targetRoutes))
 	mux.HandleFunc("PUT /api/admin/targets/{id}/routes", s.admin(s.updateTargetRoutes))
+	mux.HandleFunc("POST /api/admin/targets/{id}/routes/trace", s.admin(s.traceTargetNow))
 	mux.HandleFunc("POST /api/admin/targets/{target}/return-update", s.admin(s.queueUpdate))
 	mux.HandleFunc("POST /api/admin/targets/{id}/return-command", s.admin(s.returnInstallCommand))
 	mux.HandleFunc("DELETE /api/admin/targets/{id}/return-runner", s.admin(s.removeReturnRunner))

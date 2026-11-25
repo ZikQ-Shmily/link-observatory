@@ -2,7 +2,6 @@ package main
 
 import (
 	"net/http"
-	"strings"
 	"time"
 
 	"link-observatory/internal/protocol"
@@ -38,9 +37,9 @@ func (s *server) queueUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	tag, official := strings.CutPrefix(release.URL, protocol.ReleaseDownloadPrefix)
+	tag := release.officialTag()
 	offer := protocol.UpdateOffer{ID: randomHex(16), Version: tag, InstallerSHA256: release.SHA256}
-	if !official || !offer.Valid() {
+	if !offer.Valid() {
 		writeError(w, http.StatusConflict, "管理端更新需要官方稳定发行版。")
 		return
 	}

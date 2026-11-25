@@ -125,45 +125,64 @@ func (target targetRecord) routeStep() int64 {
 	return int64(target.Route.Minutes) * 60
 }
 
+func (state diskState) routeJobs(target targetRecord, agent nodeRecord, now, window int64) []protocol.RouteJob {
+	var jobs []protocol.RouteJob
+	add := func(probe, direction, address string, family int) {
+		if address == "" {
+			return
+		}
+		jobs = append(jobs, protocol.RouteJob{TargetID: target.ID, Generation: target.routeGeneration(), ProbeID: probe,
+			Direction: direction, Address: address, SourceIP: agent.egress(family, now), Family: family, Window: window})
+	}
+	if agent.ReturnTarget == "" {
+		targetIP, literal := protocol.ParseTargetIP(target.IP)
+		for _, family := range []int{4, 6} {
+			if !literal || targetIP.Is4() == (family == 4) {
+				add(agent.ID, protocol.RouteOut, target.IP, family)
+			}
+		}
+	} else if target.ID == agent.ReturnTarget && target.ReturnRunner == agent.ID {
+		for _, probe := range state.Nodes {
+			for _, family := range []int{4, 6} {
+				add(probe.ID, protocol.RouteBack, probe.egress(family, now), family)
+			}
+		}
+	}
+	return jobs
+}
+
 func (state diskState) pendingRoutes(agent nodeRecord, now int64) []protocol.RouteJob {
 	jobs := []protocol.RouteJob{}
 	if !agent.RouteReady {
 		return jobs
 	}
-	add := func(target targetRecord, probe, direction, address string, family int) {
-		if address == "" {
-			return
-		}
-		job := protocol.RouteJob{TargetID: target.ID, Generation: target.routeGeneration(), ProbeID: probe,
-			Direction: direction, Address: address, SourceIP: agent.egress(family, now), Family: family, Window: protocol.WindowStart(now, int(target.routeStep()))}
-		latest := state.Routes[routeKey(job)].Latest.Job
-		if latest.Window != job.Window || latest.Address != job.Address || latest.SourceIP != job.SourceIP || latest.Generation != job.Generation {
-			jobs = append(jobs, job)
-		}
-	}
 	for _, target := range state.Targets {
+		if agent.ManualRoutes {
+			jobs = target.ManualTrace.appendPending(jobs, state, target, agent, now)
+		}
 		if !target.Route.Enabled {
 			continue
 		}
-		if agent.ReturnTarget == "" {
-			targetIP, literal := protocol.ParseTargetIP(target.IP)
-			for _, family := range []int{4, 6} {
-				if !literal || targetIP.Is4() == (family == 4) {
-					add(target, agent.ID, protocol.RouteOut, target.IP, family)
-				}
-			}
-			continue
-		}
-		if target.ID != agent.ReturnTarget || target.ReturnRunner != agent.ID {
-			continue
-		}
-		for _, probe := range state.Nodes {
-			for _, family := range []int{4, 6} {
-				add(target, probe.ID, protocol.RouteBack, probe.egress(family, now), family)
+		window := protocol.WindowStart(now, int(target.routeStep()))
+		for _, job := range state.routeJobs(target, agent, now, window) {
+			latest := state.Routes[routeKey(job)].Latest.Job
+			if latest.Window != job.Window || latest.Address != job.Address || latest.SourceIP != job.SourceIP || latest.Generation != job.Generation {
+				jobs = append(jobs, job)
 			}
 		}
 	}
 	slices.SortFunc(jobs, func(a, b protocol.RouteJob) int {
+		if a.ManualID != "" || b.ManualID != "" {
+			if a.ManualID == "" {
+				return 1
+			}
+			if b.ManualID == "" {
+				return -1
+			}
+			if a.Window != b.Window {
+				return cmp.Compare(a.Window, b.Window)
+			}
+		}
 		left, right := state.Routes[routeKey(a)].UpdatedAt, state.Routes[routeKey(b)].UpdatedAt
 		if left != right {
 			return cmp.Compare(left, right)
@@ -185,9 +204,9 @@ func (s *server) routePoll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().Unix()
-	if input.Sampled || agent.RouteReady != input.Ready {
+	if input.Sampled || agent.RouteReady != input.Ready || agent.ManualRoutes != input.Manual {
 		next := s.state
-		agent.RouteReady = input.Ready
+		agent.RouteReady, agent.ManualRoutes = input.Ready, input.Manual
 		if input.Sampled {
 			next.setEgress(&agent, input.IPv4, 4, now)
 			next.setEgress(&agent, input.IPv6, 6, now)
@@ -213,6 +232,10 @@ func (state diskState) permitsRoute(agent nodeRecord, job protocol.RouteJob, now
 	if (job.Window != current && job.Window != current-target.routeStep()) || job.SourceIP != agent.egress(job.Family, now) {
 		return false
 	}
+	return state.permitsRouteAddress(target, agent, job, now)
+}
+
+func (state diskState) permitsRouteAddress(target targetRecord, agent nodeRecord, job protocol.RouteJob, now int64) bool {
 	switch job.Direction {
 	case protocol.RouteOut:
 		return agent.ReturnTarget == "" && agent.ID == job.ProbeID && target.IP == job.Address
@@ -267,7 +290,12 @@ func (s *server) routeResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := time.Now().Unix()
-	if !s.state.permitsRoute(agent, result.Job, now) {
+	job := result.Job
+	if job.ManualID != "" {
+		s.acceptManualTrace(w, agent, result, now)
+		return
+	}
+	if !s.state.permitsRoute(agent, job, now) {
 		writeError(w, http.StatusConflict, "route assignment changed")
 		return
 	}
@@ -365,42 +393,41 @@ func (state *diskState) addRoute(result protocol.RouteResult, now int64) bool {
 
 func (s *server) targetRoutes(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	target, exists := s.state.Targets[r.PathValue("id")]
+	state := s.state
+	s.mu.Unlock()
+	target, exists := state.Targets[r.PathValue("id")]
 	if !exists {
 		writeError(w, http.StatusNotFound, "target not found")
 		return
 	}
-	results := []protocol.RouteResult{}
+	results := state.displayRoutes(target)
 	changes := []routeChange{}
-	for _, item := range s.state.Routes {
-		job := item.Latest.Job
-		if job.TargetID == target.ID && job.Generation == target.routeGeneration() {
-			if _, ok := s.state.Nodes[job.ProbeID]; ok {
-				results = append(results, item.Latest)
-			}
-		}
-	}
-	for i := len(s.state.RouteChanges) - 1; i >= 0; i-- {
-		if event := s.state.RouteChanges[i]; event.Job.TargetID == target.ID {
+	for i := len(state.RouteChanges) - 1; i >= 0; i-- {
+		if event := state.RouteChanges[i]; event.Job.TargetID == target.ID {
 			changes = append(changes, event)
 		}
 	}
-	runner := s.state.RouteRunners[target.ReturnRunner]
+	runner := state.RouteRunners[target.ReturnRunner]
+	now := time.Now()
 	status := "pending"
 	if runner.Credential != "" {
 		status = "offline"
-		if runner.LastSeen != 0 && !probeOffline(runner, time.Now()) {
+		if runner.LastSeen != 0 && !probeOffline(runner, now) {
 			status = "unavailable"
 			if runner.RouteReady {
 				status = "online"
 			}
 		}
 	}
+	var latest, available string
+	if runner.Version != "" {
+		latest, available = s.probeVersions(r.Context())
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": target.Route.Enabled, "minutes": target.routeStep() / 60,
-		"runner": status, "runner_id": runner.ID, "runner_version": runner.Version,
-		"runner_managed_updates": runner.ManagedUpdates, "runner_update": runner.Update.view(time.Now()), "routes": results, "changes": changes, "egress_changes": s.state.EgressChanges,
-		"runner_ipv4": runner.egress(4, time.Now().Unix()), "runner_ipv6": runner.egress(6, time.Now().Unix())})
+		"runner": status, "runner_id": runner.ID, "runner_version": runner.Version, "latest_probe_version": latest,
+		"runner_update_available": protocol.NewerVersion(available, runner.Version),
+		"runner_managed_updates":  runner.ManagedUpdates, "runner_update": runner.Update.view(now), "routes": results, "changes": changes, "egress_changes": state.EgressChanges,
+		"runner_ipv4": runner.egress(4, now.Unix()), "runner_ipv6": runner.egress(6, now.Unix()), "manual": target.ManualTrace.view(now.Unix())})
 }
 
 func (s *server) updateTargetRoutes(w http.ResponseWriter, r *http.Request) {
@@ -408,7 +435,7 @@ func (s *server) updateTargetRoutes(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input, 2048) {
 		return
 	}
-	if !slices.Contains([]int{5, 15, 30, 60}, input.Minutes) {
+	if !slices.Contains([]int{5, 15, 30, 60, 360, 720, 1440, 2880}, input.Minutes) {
 		writeError(w, http.StatusBadRequest, "invalid route interval")
 		return
 	}
@@ -483,12 +510,18 @@ func (s *server) returnInstallCommand(w http.ResponseWriter, r *http.Request) {
 func (state *diskState) removeRoutes(matches func(protocol.RouteJob) bool) {
 	state.Routes = maps.Clone(state.Routes)
 	maps.DeleteFunc(state.Routes, func(_ string, route routeSeries) bool { return matches(route.Latest.Job) })
+	state.ManualResults = maps.Clone(state.ManualResults)
+	maps.DeleteFunc(state.ManualResults, func(_ string, route manualRouteResult) bool { return matches(route.Result.Job) })
 }
 
 func (state *diskState) clearReturnRunner(target *targetRecord) {
 	state.RouteRunners = maps.Clone(state.RouteRunners)
 	delete(state.RouteRunners, target.ReturnRunner)
 	target.ReturnRunner = ""
+	target.ManualTrace = manualRouteRound{}
+	state.removeRoutes(func(job protocol.RouteJob) bool {
+		return job.TargetID == target.ID && job.Direction == protocol.RouteBack
+	})
 }
 
 func (s *server) removeReturnRunner(w http.ResponseWriter, r *http.Request) {
