@@ -92,10 +92,15 @@ cp "$HOME/$file" "$2"
 dir=${!#}
 case $1 in
     register)
+        [[ ! -f $dir/running ]] || { echo 'probe directory is in use' >&2; exit 1; }
         if [[ ! -f $dir/credentials.json ]]; then
             IFS= read -r token && [[ $token == test-token ]] || exit 1
             touch "$dir/credentials.json" "$dir/running"
         fi
+        ;;
+    check-registration)
+        [[ -f $dir/credentials.json ]] && [[ ! -e $dir/registration-invalid ]] ||
+            { echo 'invalid local probe credentials' >&2; exit 1; }
         ;;
     run) touch "$dir/running"; sleep 0.4 ;;
     status) [[ -f $dir/running ]] ;;
@@ -158,6 +163,20 @@ esac
 		t.Fatal("failed verification altered the previous installation")
 	}
 	write(metadata, update+"\n"+digest(read(filepath.Join(home, "update-script")))+"\ntrue\n", 0600)
+	invalid := filepath.Join(node, "registration-invalid")
+	write(invalid, "", 0600)
+	if output := run(false, script, "--update"); !strings.Contains(output, "invalid local probe credentials") {
+		t.Fatalf("installer did not show the actual preflight error: %s", output)
+	}
+	if _, err := os.Stat(filepath.Join(node, "running")); err != nil {
+		t.Fatalf("rejected preflight stopped the original node: %v", err)
+	}
+	if saved := read(settings); saved != manager+"\n"+initial+"\n"+proxy+"\n" {
+		t.Fatalf("rejected preflight altered settings: %q", saved)
+	}
+	if err := os.Remove(invalid); err != nil {
+		t.Fatal(err)
+	}
 	run(true, script, "--update")
 	if saved := read(settings); saved != manager+"\n"+update+"\n"+proxy+"\n" {
 		t.Fatalf("update did not retain saved proxy: %q", saved)
@@ -175,6 +194,8 @@ esac
 		proxy + "/" + mainInstallerURL, proxy + "/" + latest,
 		proxy + "/" + mainInstallerURL, proxy + "/" + latest, proxy + "/" + initial + "/link-probe-linux-amd64", proxy + "/" + nextTrace,
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
+		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
+		proxy + "/" + update + "/link-probe-linux-amd64", proxy + "/" + nextTrace,
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
 		proxy + "/" + update + "/link-probe-linux-amd64", proxy + "/" + nextTrace,
 	}

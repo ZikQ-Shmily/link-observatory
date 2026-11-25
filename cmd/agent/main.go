@@ -44,7 +44,7 @@ func main() {
 
 func execute(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: agent {register|run|status|stop|version}")
+		return errors.New("usage: agent {register|check-registration|run|status|stop|version}")
 	}
 	if len(args) == 1 && args[0] == "version" {
 		fmt.Println(version)
@@ -55,7 +55,7 @@ func execute(args []string) error {
 	directory := flags.String("dir", "", "private probe instance directory")
 	var manager, nodeID *string
 	switch command {
-	case "register":
+	case "register", "check-registration":
 		manager = flags.String("manager", "", "HTTPS manager URL")
 		nodeID = flags.String("node", "", "manager-issued node ID")
 	case "run", "status", "stop":
@@ -81,6 +81,9 @@ func execute(args []string) error {
 			}
 		}
 		return err
+	}
+	if command == "check-registration" {
+		return checkRegistration(*manager, *nodeID)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -120,6 +123,25 @@ func enterDirectory(dir string, create bool) error {
 func ownedByCurrentUser(info os.FileInfo) bool {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	return ok && stat.Uid == uint32(os.Geteuid())
+}
+
+// Updates verify the saved identity while the current agent still owns run.lock.
+func checkRegistration(managerURL, nodeID string) error {
+	managerURL, err := validateManagerURL(managerURL)
+	if err != nil {
+		return err
+	}
+	state, err := loadCredentials()
+	if err != nil {
+		return fmt.Errorf("read saved probe credentials: %w", err)
+	}
+	if state.Manager != managerURL || state.NodeID != nodeID {
+		return errors.New("probe directory already belongs to another node or manager")
+	}
+	if !state.Enrolled {
+		return errors.New("probe registration is incomplete")
+	}
+	return nil
 }
 
 func register(ctx context.Context, managerURL, nodeID string, input io.Reader) error {

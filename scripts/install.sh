@@ -258,10 +258,9 @@ register_node() {
 }
 
 registered() {
-    local binary=${1:-$agent}
     # The agent checks its persisted enrollment before reading the token.
-    [[ -x $binary && -f $node_dir/credentials.json ]] &&
-        "$binary" register --manager "$manager" --node "$node" --dir "$node_dir" </dev/null >/dev/null 2>&1
+    [[ -x $agent && -f $node_dir/credentials.json ]] &&
+        "$agent" register --manager "$manager" --node "$node" --dir "$node_dir" </dev/null >/dev/null 2>&1
 }
 
 print_node_commands() {
@@ -365,8 +364,9 @@ install_node() {
             fi
             cp -- "$agent" "$stage_dir/previous-probe"
         fi
-        if [[ $action == update ]] && ! registered "$stage_dir/link-probe"; then
-            fail '现有节点凭证不可用，已保留原安装。请检查节点注册状态。'
+        if [[ $action == update ]] && ! "$stage_dir/link-probe" check-registration \
+            --manager "$manager" --node "$node" --dir "$node_dir"; then
+            fail '未通过本地注册信息检查，已保留原安装。'
         fi
         stop_node || fail '无法停止当前实例，已保留当前安装'
         mv -- "$stage_dir/link-probe" "$agent"
