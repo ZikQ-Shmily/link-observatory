@@ -33,6 +33,28 @@ func ParseTargetIP(value string) (netip.Addr, bool) {
 	return ip, true
 }
 
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"), netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"), netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"), netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("2001:db8::/32"), netip.MustParsePrefix("3fff::/20"),
+}
+
+func PublicIP(value string, family int) (netip.Addr, bool) {
+	ip, ok := ParseTargetIP(value)
+	if !ok || !ip.IsGlobalUnicast() || ip.IsPrivate() ||
+		(family != 4 && family != 6) || ip.Is4() != (family == 4) {
+		return netip.Addr{}, false
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(ip) {
+			return netip.Addr{}, false
+		}
+	}
+	return ip, true
+}
+
 // NormalizeTargetAddress accepts an IP literal or a fully qualified ASCII hostname.
 func NormalizeTargetAddress(value string) (string, bool) {
 	value = strings.TrimSpace(value)
@@ -108,4 +130,48 @@ type Report struct {
 	ICMPv4  bool     `json:"icmp_v4"`
 	ICMPv6  bool     `json:"icmp_v6"`
 	Results []Result `json:"results"`
+}
+
+const (
+	RoutePollPath   = "/api/agent/routes/poll"
+	RouteResultPath = "/api/agent/routes/result"
+	MaxRouteHops    = 30
+	RouteOut        = "out"
+	RouteBack       = "back"
+)
+
+type RoutePoll struct {
+	Busy    bool   `json:"busy,omitempty"`
+	Ready   bool   `json:"ready"`
+	Sampled bool   `json:"sampled"`
+	IPv4    string `json:"ipv4,omitempty"`
+	IPv6    string `json:"ipv6,omitempty"`
+}
+
+type RouteJob struct {
+	SourceIP   string `json:"source_ip,omitempty"`
+	TargetID   string `json:"target_id"`
+	Generation string `json:"generation"`
+	ProbeID    string `json:"probe_id"`
+	Direction  string `json:"direction"`
+	Family     int    `json:"family"`
+	Address    string `json:"address"`
+	Window     int64  `json:"window"`
+}
+
+type RouteHop struct {
+	TTL      int     `json:"ttl"`
+	IP       string  `json:"ip"`
+	RTT      float64 `json:"rtt_ms"`
+	ASN      string  `json:"asn,omitempty"`
+	Location string  `json:"location,omitempty"`
+	Network  string  `json:"network,omitempty"`
+	Hostname string  `json:"hostname,omitempty"`
+}
+
+type RouteResult struct {
+	Job   RouteJob   `json:"job"`
+	IP    string     `json:"destination_ip,omitempty"`
+	Hops  []RouteHop `json:"hops,omitempty"`
+	Error string     `json:"error,omitempty"`
 }

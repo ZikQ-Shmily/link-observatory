@@ -97,7 +97,7 @@ check_node() {
     check_directories "$dir"
     if [[ $system_install == true ]]; then
         check_root_files "$dir/link-probe" "$dir/settings" "$dir/install.sh" "$dir/agent.log" \
-            "$dir/credentials.json" "$dir/reports.json" "$dir/run.lock"
+            "$dir/credentials.json" "$dir/reports.json" "$dir/run.lock" "$dir/nexttrace-tiny" "$dir/route-program"
     fi
 }
 
@@ -274,6 +274,61 @@ print_node_commands() {
     fi
 }
 
+usable_nexttrace() {
+    local candidate=$1 permissions directory help
+    [[ $candidate == /* && -f $candidate && -x $candidate ]] || return 1
+    if [[ $system_install == true ]]; then
+        directory=$candidate
+        while [[ $directory != / ]]; do
+            [[ -O $directory ]] || return 1
+            permissions=$(stat -c %a -- "$directory") || return 1
+            (( (8#$permissions & 022) == 0 )) || return 1
+            directory=$(dirname -- "$directory")
+        done
+    fi
+    help=$(timeout 5s "$candidate" --help 2>&1) || true
+    [[ $help == *--json* ]]
+}
+
+prepare_nexttrace() {
+    local name candidate asset expected base
+    for name in nexttrace nexttrace-tiny; do
+        candidate=$(command -v "$name") || continue
+        candidate=$(realpath -e -- "$candidate") || continue
+        if usable_nexttrace "$candidate"; then
+            printf '%s\n' "$candidate" > "$stage_dir/route-program"
+            printf '复用本机 NextTrace：%s\n' "$candidate"
+            return
+        fi
+    done
+
+    base=https://github.com/nxtrace/NTrace-core/releases/download/v1.7.6
+    case "$1" in
+        link-probe-linux-amd64)
+            asset=nexttrace-tiny_linux_amd64
+            expected=9f219ba91318a3e1534bd28c661ef8019da42825ed48257035c508962d007271 ;;
+        link-probe-linux-arm64)
+            asset=nexttrace-tiny_linux_arm64
+            expected=aeab456e2f8aebd62cd1dd2d6458d2ec57b38f5d707e196bab41f999ff898810 ;;
+    esac
+    if [[ -x $node_dir/nexttrace-tiny ]] &&
+        printf '%s  %s\n' "$expected" "$node_dir/nexttrace-tiny" | sha256sum -c --status -; then
+        printf '%s\n' "$node_dir/nexttrace-tiny" > "$stage_dir/route-program"
+        return
+    fi
+    printf '正在下载 NextTrace Tiny。\n'
+    candidate="$stage_dir/nexttrace-tiny"
+    if download "$(release_asset "$base" "$asset")" "$candidate" &&
+        printf '%s  %s\n' "$expected" "$candidate" | sha256sum -c --status - &&
+        chmod 700 "$candidate"; then
+        printf '%s\n' "$node_dir/nexttrace-tiny" > "$stage_dir/route-program"
+        return
+    fi
+    rm -f -- "$candidate"
+    : > "$stage_dir/route-program"
+    printf 'NextTrace 下载失败。路由追踪暂不可用，可重新运行本地 install.sh 更新。\n' >&2
+}
+
 install_node() {
     local artifact expected was_running=false
     if [[ $action == update && ! -f $node_dir/credentials.json ]]; then
@@ -296,6 +351,7 @@ install_node() {
     cp -- "$script_path" "$stage_dir/install.sh"
     chmod 700 "$stage_dir/$artifact" "$stage_dir/install.sh"
     mv -- "$stage_dir/$artifact" "$stage_dir/link-probe"
+    prepare_nexttrace "$artifact"
     printf '%s\n' "$manager" "$release" "$gh_proxy" > "$stage_dir/settings"
 
     if [[ ! -d $node_dir ]]; then
@@ -335,6 +391,12 @@ install_node() {
     if [[ -n $stage_dir ]]; then
         mv -- "$stage_dir/install.sh" "$node_dir/install.sh"
         mv -- "$stage_dir/settings" "$node_dir/settings"
+        if [[ -f $stage_dir/nexttrace-tiny ]]; then
+            mv -fT -- "$stage_dir/nexttrace-tiny" "$node_dir/nexttrace-tiny"
+        fi
+        if [[ -f $stage_dir/route-program ]]; then
+            mv -fT -- "$stage_dir/route-program" "$node_dir/route-program"
+        fi
         install_launcher
     fi
     print_node_commands
@@ -389,10 +451,15 @@ probe_state() {
 }
 
 show_status() {
-    local version
+    local version route_path
     version=$("$agent" version 2>/dev/null) || version='未知'
     printf '节点：%s\n运行状态：%s\n版本：%s\n管理端：%s\nGitHub 下载：%s\n安装目录：%s\n' \
         "$node" "$(probe_state)" "$version" "$saved_manager" "$(download_mode)" "$node_dir"
+    if [[ -r $node_dir/route-program ]] && IFS= read -r route_path < "$node_dir/route-program" && [[ -x $route_path ]]; then
+        printf 'NextTrace：%s\n' "$route_path"
+    else
+        printf 'NextTrace：不可用\n'
+    fi
 }
 
 set_download_mode() {

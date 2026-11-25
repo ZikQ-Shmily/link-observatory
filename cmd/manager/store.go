@@ -23,20 +23,24 @@ const (
 )
 
 type nodeRecord struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	Location         string `json:"location"`
-	ISP              string `json:"isp"`
-	Group            string `json:"group"`
-	Version          string `json:"version,omitempty"`
-	ICMPv4           bool   `json:"icmp_v4"`
-	ICMPv6           bool   `json:"icmp_v6"`
-	MailOfflineSince int64  `json:"mail_offline_since,omitempty"`
-	LastSeen         int64  `json:"last_seen,omitempty"`
-	EvidenceStart    int64  `json:"evidence_start,omitempty"`
-	Enrollment       string `json:"enrollment,omitempty"`
-	TokenExpiry      int64  `json:"token_expiry,omitempty"`
-	Credential       string `json:"credential,omitempty"`
+	ID               string        `json:"id"`
+	Name             string        `json:"name"`
+	Location         string        `json:"location"`
+	ISP              string        `json:"isp"`
+	Group            string        `json:"group"`
+	Version          string        `json:"version,omitempty"`
+	ICMPv4           bool          `json:"icmp_v4"`
+	ICMPv6           bool          `json:"icmp_v6"`
+	MailOfflineSince int64         `json:"mail_offline_since,omitempty"`
+	LastSeen         int64         `json:"last_seen,omitempty"`
+	EvidenceStart    int64         `json:"evidence_start,omitempty"`
+	Enrollment       string        `json:"enrollment,omitempty"`
+	TokenExpiry      int64         `json:"token_expiry,omitempty"`
+	Credential       string        `json:"credential,omitempty"`
+	ReturnTarget     string        `json:"return_target,omitempty"`
+	RouteReady       bool          `json:"route_ready,omitempty"`
+	Egress4          egressAddress `json:"egress_v4,omitzero"`
+	Egress6          egressAddress `json:"egress_v6,omitzero"`
 }
 
 type roundStatus struct {
@@ -59,6 +63,8 @@ type targetRecord struct {
 	TCPAlert          protocolAlertState `json:"tcp_alert,omitzero"`
 	ICMPAlert         protocolAlertState `json:"icmp_alert,omitzero"`
 	CandidateStatus   string             `json:"candidate_status,omitempty"`
+	Route             routeSettings      `json:"route,omitzero"`
+	ReturnRunner      string             `json:"return_runner,omitempty"`
 }
 
 func (target *targetRecord) resetEvidenceStreaks() {
@@ -113,6 +119,10 @@ type diskState struct {
 	LastEvaluated        int64                              `json:"last_evaluated"`
 	ProbeIntervalSeconds int                                `json:"probe_interval_seconds"`
 	ScheduleStart        int64                              `json:"schedule_start,omitempty"`
+	RouteRunners         map[string]nodeRecord              `json:"route_runners,omitempty"`
+	Routes               map[string]routeSeries             `json:"routes,omitempty"`
+	RouteChanges         []routeChange                      `json:"route_changes,omitempty"`
+	EgressChanges        []egressChange                     `json:"egress_changes,omitempty"`
 }
 
 func openStore(dir string, now time.Time) (string, *os.File, diskState, error) {

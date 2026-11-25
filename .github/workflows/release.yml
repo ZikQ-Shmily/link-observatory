@@ -30,6 +30,7 @@ jobs:
           cache: false
       - name: Check installer and Go code
         run: |
+          bash -n install-return.sh
           bash -n scripts/install.sh
           go test ./...
       - name: Build release assets

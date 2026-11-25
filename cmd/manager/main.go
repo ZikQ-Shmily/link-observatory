@@ -205,11 +205,17 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/nodes/{id}/install-command", s.admin(s.nodeInstallCommand))
 	mux.HandleFunc("DELETE /api/admin/nodes/{id}", s.admin(s.deleteNode))
 	mux.HandleFunc("POST /api/admin/targets", s.admin(s.addTarget))
+	mux.HandleFunc("GET /api/admin/targets/{id}/routes", s.admin(s.targetRoutes))
+	mux.HandleFunc("PUT /api/admin/targets/{id}/routes", s.admin(s.updateTargetRoutes))
+	mux.HandleFunc("POST /api/admin/targets/{id}/return-command", s.admin(s.returnInstallCommand))
+	mux.HandleFunc("DELETE /api/admin/targets/{id}/return-runner", s.admin(s.removeReturnRunner))
 	mux.HandleFunc("PUT /api/admin/targets/{id}", s.admin(s.editTarget))
 	mux.HandleFunc("DELETE /api/admin/targets/{id}", s.admin(s.deleteTarget))
 	mux.HandleFunc("POST /api/agent/register", s.register)
 	mux.HandleFunc("GET /api/agent/config", s.agentConfig)
 	mux.HandleFunc("POST /api/agent/report", s.agentReport)
+	mux.HandleFunc("POST "+protocol.RoutePollPath, s.routePoll)
+	mux.HandleFunc("POST "+protocol.RouteResultPath, s.routeResult)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -445,7 +451,7 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	node, exists := s.state.Nodes[input.NodeID]
+	node, exists := s.state.lookupAgent(input.NodeID)
 	if node.Credential != "" && matchesDigest(node.Credential, input.Credential) {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -459,15 +465,14 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	node.Credential, node.Version, node.LastSeen = digest(input.Credential), input.Version, now
 	node.Enrollment, node.TokenExpiry = "", 0
 	next := s.state
-	next.Nodes = maps.Clone(next.Nodes)
-	next.Nodes[node.ID] = node
+	next.setAgent(node)
 	if s.commit(w, next) {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 func (s *server) agent(w http.ResponseWriter, r *http.Request) (nodeRecord, bool) {
-	node := s.state.Nodes[r.Header.Get("X-Node-ID")]
+	node, _ := s.state.lookupAgent(r.Header.Get("X-Node-ID"))
 	bearer, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || node.Credential == "" || len(bearer) > 128 || !matchesDigest(node.Credential, bearer) {
 		writeError(w, http.StatusUnauthorized, "invalid node credential")
@@ -479,12 +484,16 @@ func (s *server) agent(w http.ResponseWriter, r *http.Request) (nodeRecord, bool
 func (s *server) agentConfig(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.agent(w, r); !ok {
+	node, ok := s.agent(w, r)
+	if !ok {
 		return
 	}
 	targets := make([]protocol.Target, 0, len(s.state.Targets))
 	allowHostnames := r.Header.Get(protocol.HostnamesHeader) == "1"
 	for _, target := range s.state.Targets {
+		if node.ReturnTarget != "" {
+			break
+		}
 		if !allowHostnames {
 			if _, literal := protocol.ParseTargetIP(target.IP); !literal {
 				continue
@@ -555,6 +564,13 @@ func (s *server) agentReport(w http.ResponseWriter, r *http.Request) {
 		node.Version = report.Version
 	}
 	next := s.state
+	if node.ReturnTarget != "" {
+		next.setAgent(node)
+		if s.commit(w, next) {
+			w.WriteHeader(http.StatusNoContent)
+		}
+		return
+	}
 	interval := next.ProbeIntervalSeconds
 	present := protocol.WindowStart(now.Unix(), interval)
 	next.Nodes = maps.Clone(next.Nodes)

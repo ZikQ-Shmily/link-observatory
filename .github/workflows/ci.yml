@@ -17,6 +17,7 @@ jobs:
       - name: Check installer and Go code
         run: |
           bash -n install.sh
+          bash -n install-return.sh
           bash -n scripts/install.sh
           bash -n scripts/package-install.sh
           bash -n cmd/manager/install_bootstrap.sh

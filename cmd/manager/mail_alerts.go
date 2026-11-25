@@ -20,6 +20,8 @@ const (
 )
 
 type mailNotice struct {
+	ProbeName string            `json:"probe_name,omitempty"`
+	Route     *routeChange      `json:"route,omitempty"`
 	Kind      mailKind          `json:"kind"`
 	Name      string            `json:"name,omitempty"`
 	ID        string            `json:"id,omitempty"`
@@ -36,6 +38,16 @@ type mailNotice struct {
 	At        time.Time         `json:"at"`
 	StartedAt time.Time         `json:"started_at,omitzero"`
 	LastSeen  time.Time         `json:"last_seen,omitzero"`
+}
+
+func (state *diskState) routeChangeMail(change routeChange) {
+	target := state.Targets[change.Job.TargetID]
+	node := state.Nodes[change.Job.ProbeID]
+	state.enqueueMail(mailNotice{
+		Kind: mailRouteChange, Name: target.Name, ID: target.ID, Address: target.IP, IP: change.IP,
+		ProbeName: node.Name, ISP: node.ISP, Route: &change,
+		At: time.Unix(change.At, 0).UTC(), StartedAt: time.Unix(change.FirstAt, 0).UTC(),
+	})
 }
 
 type mailJob struct {

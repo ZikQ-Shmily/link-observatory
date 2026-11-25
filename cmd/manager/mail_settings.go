@@ -37,11 +37,12 @@ const (
 	mailTCPRecovery   mailKind = "tcp_recovery"
 	mailICMPFailure   mailKind = "icmp_failure"
 	mailICMPRecovery  mailKind = "icmp_recovery"
+	mailRouteChange   mailKind = "route_change"
 	mailTest          mailKind = "test"
 )
 
 var mailKinds = []mailKind{
-	mailProbeOffline, mailProbeRecovery, mailTCPFailure, mailTCPRecovery, mailICMPFailure, mailICMPRecovery,
+	mailProbeOffline, mailProbeRecovery, mailTCPFailure, mailTCPRecovery, mailICMPFailure, mailICMPRecovery, mailRouteChange,
 }
 
 func (kind mailKind) failureKind() mailKind {

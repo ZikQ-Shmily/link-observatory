@@ -15,6 +15,9 @@ import (
 )
 
 type nodeView struct {
+	EgressIPv4       string     `json:"egress_ipv4,omitempty"`
+	EgressIPv6       string     `json:"egress_ipv6,omitempty"`
+	RouteReady       bool       `json:"route_ready"`
 	ID               string     `json:"id"`
 	Name             string     `json:"name"`
 	Location         string     `json:"location"`
@@ -67,6 +70,7 @@ func describeNode(node nodeRecord, now time.Time) nodeView {
 		ID: node.ID, Name: node.Name, Location: node.Location, ISP: node.ISP, Group: node.Group,
 		State: "pending", Version: node.Version, ICMPv4: node.ICMPv4, ICMPv6: node.ICMPv6,
 		ManageCommand: manage, UninstallCommand: manage + " uninstall",
+		EgressIPv4: node.egress(4, now.Unix()), EgressIPv6: node.egress(6, now.Unix()), RouteReady: node.RouteReady,
 	}
 	if node.LastSeen > 0 {
 		seen := time.Unix(node.LastSeen, 0).UTC()
@@ -260,6 +264,7 @@ func (s *server) editNode(w http.ResponseWriter, r *http.Request) {
 		node.EvidenceStart = now.Unix() + 1
 		next.Samples = maps.Clone(next.Samples)
 		delete(next.Samples, id)
+		next.removeRoutes(func(job protocol.RouteJob) bool { return job.ProbeID == id })
 		next.Targets = maps.Clone(next.Targets)
 		for targetID, target := range next.Targets {
 			target.resetEvidenceStreaks()
@@ -399,13 +404,17 @@ func (s *server) editTarget(w http.ResponseWriter, r *http.Request) {
 	if target.IP != address.IP || target.Port != address.Port {
 		oldEndpoint := net.JoinHostPort(target.IP, strconv.Itoa(target.Port))
 		updated := targetRecord{
-			Target: target.Target, CreatedAt: target.CreatedAt,
+			Target: target.Target, CreatedAt: target.CreatedAt, Route: target.Route, ReturnRunner: target.ReturnRunner,
 			EndpointChangedAt: now, ProbeID: "target-" + randomHex(8),
 		}
 		if target.IP == address.IP {
 			updated.AlertsInitialized = target.AlertsInitialized
 			updated.ICMPAlert = target.ICMPAlert
 			updated.ICMPAlert.resetStreaks()
+		} else {
+			next.clearReturnRunner(&updated)
+			next.removeRoutes(func(job protocol.RouteJob) bool { return job.TargetID == id })
+			updated.Route.Revision = randomHex(8)
 		}
 		target = updated
 		next.Samples = maps.Clone(next.Samples)
@@ -446,7 +455,8 @@ func (s *server) deleteTarget(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, exists := s.state.Targets[id]; !exists {
+	target, exists := s.state.Targets[id]
+	if !exists {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -454,6 +464,8 @@ func (s *server) deleteTarget(w http.ResponseWriter, r *http.Request) {
 	next := s.state
 	next.Targets = maps.Clone(next.Targets)
 	delete(next.Targets, id)
+	next.clearReturnRunner(&target)
+	next.removeRoutes(func(job protocol.RouteJob) bool { return job.TargetID == id })
 	next.TargetOrder = removeOrderEntry(next.TargetOrder, id)
 	next.Samples = maps.Clone(next.Samples)
 	removeTargetSamples(next.Samples, id)

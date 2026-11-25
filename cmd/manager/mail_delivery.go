@@ -151,6 +151,18 @@ func formatReachability(count reachabilityCount) string {
 	return fmt.Sprintf("%d/%d", count.Reachable, count.Valid)
 }
 
+func routeMailIPs(hops []protocol.RouteHop) string {
+	labels := make([]string, 0, len(hops))
+	for _, hop := range hops {
+		label := hop.IP
+		if hop.ASN != "" {
+			label += " (" + hop.ASN + ")"
+		}
+		labels = append(labels, label)
+	}
+	return strings.Join(labels, "、")
+}
+
 func notificationContent(notice mailNotice, link string) mailContent {
 	content := mailContent{Link: link}
 	if notice.Kind == mailTest {
@@ -159,6 +171,26 @@ func notificationContent(notice mailNotice, link string) mailContent {
 		content.State = "SMTP 测试"
 		content.Summary = "链路观测已通过当前 SMTP 设置发送这封测试邮件。"
 		content.Success = true
+		return content
+	}
+
+	if notice.Kind == mailRouteChange && notice.Route != nil {
+		change := notice.Route
+		direction := "去程"
+		if change.Job.Direction == protocol.RouteBack {
+			direction = "回程"
+		}
+		content.Subject = "[链路观测] " + direction + "路由变化 · " + notice.Name
+		content.Heading = notice.Name + " 的" + direction + "路由已变化"
+		content.State = fmt.Sprintf("%s · IPv%d", direction, change.Job.Family)
+		content.Endpoint = notice.IP
+		content.Summary = "连续两轮观察到相同的跳点变化。"
+		content.Facts = []mailFact{{"探针", notice.ProbeName}, {"运营商", notice.ISP},
+			{"首次发现", mailTime(notice.StartedAt)}, {"确认时间", mailTime(notice.At)}}
+		for _, hop := range change.Hops {
+			content.Facts = append(content.Facts, mailFact{fmt.Sprintf("第 %d 跳", hop.TTL),
+				routeMailIPs(hop.Before) + " → " + routeMailIPs(hop.After)})
+		}
 		return content
 	}
 

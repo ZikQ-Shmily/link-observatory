@@ -497,3 +497,14 @@ body { margin: 0; background: #fdfdfd; }
   #ip-monitor-console .console-brand { height: 28px; }
   #ip-monitor-console .reorder-grip { width: 36px; height: 44px; }
 }
+#ip-monitor-console .route-filters { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+#ip-monitor-console [aria-label="目标详情"].route-filters { justify-content: flex-start; margin: 0 0 16px; }
+#ip-monitor-console .route-filters .action[aria-pressed="true"] {
+  color: var(--panel);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+#ip-monitor-console .route-table { overflow-wrap: anywhere; }
+#ip-monitor-console .route-changes { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin-top: 8px; }
+#ip-monitor-console .route-changes dt { color: var(--muted); }
+#ip-monitor-console .route-changes dd { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }

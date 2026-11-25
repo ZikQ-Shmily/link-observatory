@@ -74,6 +74,7 @@ cp "$HOME/$file" "$2"
 		initial = officialReleaseDownloadPrefix + "v0.1.11"
 		update  = officialReleaseDownloadPrefix + "v0.1.12"
 		latest  = "https://github.com/" + installerRepo + "/releases/latest/download/install.sh"
+		tiny    = "https://github.com/nxtrace/NTrace-core/releases/download/v1.7.6/nexttrace-tiny_linux_amd64"
 	)
 	t.Setenv("TEST_TRACE", trace)
 	t.Setenv("TEST_MANAGER", manager)
@@ -169,10 +170,10 @@ esac
 	}
 	want := []string{
 		proxy + "/" + mainInstallerURL, proxy + "/" + latest,
-		proxy + "/" + mainInstallerURL, proxy + "/" + latest, proxy + "/" + initial + "/link-probe-linux-amd64",
+		proxy + "/" + mainInstallerURL, proxy + "/" + latest, proxy + "/" + initial + "/link-probe-linux-amd64", proxy + "/" + tiny,
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
 		manager + "/api/agent/installer-release", proxy + "/" + update + "/install.sh",
-		proxy + "/" + update + "/link-probe-linux-amd64",
+		proxy + "/" + update + "/link-probe-linux-amd64", proxy + "/" + tiny,
 	}
 	if downloads := strings.Split(strings.TrimSpace(read(trace)), "\n"); !slices.Equal(downloads, want) {
 		t.Fatalf("unexpected download routes: %v", downloads)

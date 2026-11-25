@@ -83,6 +83,15 @@ func run(parent context.Context) error {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
+	routeDone := make(chan struct{})
+	go func() {
+		defer close(routeDone)
+		runRoutes(ctx, state)
+	}()
+	defer func() {
+		cancel()
+		<-routeDone
+	}()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
