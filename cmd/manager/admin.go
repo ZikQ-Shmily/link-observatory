@@ -72,7 +72,7 @@ func describeNode(node nodeRecord, now time.Time) nodeView {
 	view := nodeView{
 		ID: node.ID, Name: node.Name, Location: node.Location, ISP: node.ISP, Group: node.Group,
 		State: "pending", Version: node.Version, ICMPv4: node.ICMPv4, ICMPv6: node.ICMPv6,
-		ManagedUpdates: node.ManagedUpdates, Update: node.Update.view(now),
+		ManagedUpdates: node.ManagedUpdates, Update: node.updateView(now),
 		ManageCommand: manage, UninstallCommand: manage + " uninstall",
 		EgressIPv4: node.egress(4, now.Unix()), EgressIPv6: node.egress(6, now.Unix()), RouteReady: node.RouteReady,
 	}

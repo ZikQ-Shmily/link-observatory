@@ -13,6 +13,7 @@ const dateFormat = new Intl.DateTimeFormat("zh-CN", dateOptions);
 const roundDateFormat = new Intl.DateTimeFormat("zh-CN", { ...dateOptions, year: "numeric" });
 const historySize = 12;
 const mainViews = ["overview", "targets", "nodes", "events"];
+const observedTasks = new Map();
 let routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, changeKey: "", focusChange: false, data: null, error: "" };
 let rowDrag = null;
 let reorderPending = false;
@@ -286,8 +287,16 @@ function routeChanges(data) {
 function routeInterval(minutes) {
   return minutes >= 60 ? (minutes / 60) + " 小时" : minutes + " 分钟";
 }
-function manualRouteStatus(run) {
-  if (!run) return "";
+function observeTask(scope, id, task) {
+  if (task?.id && ["queued", "running"].includes(task.state ?? task.status)) {
+    observedTasks.set(scope + "/" + id, task.id);
+  }
+}
+function wasTaskObserved(scope, id, task) {
+  return Boolean(task?.id) && observedTasks.get(scope + "/" + id) === task.id;
+}
+function manualRouteStatus(targetID, run) {
+  if (!run || (run.state === "completed" && !wasTaskObserved("trace", targetID, run))) return "";
   const marks = { running: ["warn", "正在追踪"], completed: ["ok", "手动追踪完成"], expired: ["warn", "手动追踪超时"] };
   const mark = marks[run.state];
   if (!mark) return "";
@@ -299,21 +308,24 @@ function routePanel(target) {
   if (!data) {
     return '<p class="empty">' + escape(routeView.error || "正在读取路由追踪…") + "</p>";
   }
-  if (routeView.panel === "changes") return routeChanges(data);
+  const warning = routeView.error ? '<p class="form-message" role="status">' +
+    escape(routeView.error + "。以下为上次读取的路由数据。") + "</p>" : "";
+  if (routeView.panel === "changes") return warning + routeChanges(data);
+  const manual = routeView.error && data.manual?.state === "completed" ? null : data.manual;
   const status = { pending: ["quiet", "未部署"], offline: ["quiet", "离线"], unavailable: ["warn", "NextTrace 不可用"], online: ["ok", "在线"] };
   const startTrace = action("立即追踪", "trace-now", target.id, true);
   const traceControl = data.manual?.state === "running" ? startTrace.replace(' type="button"', ' type="button" disabled') : startTrace;
   const runnerVersion = data.runner_version ? '<code class="target-address">版本 ' +
     agentVersion(data.runner_version, data.latest_probe_version) + "</code>" : "";
-  const header = '<section class="surface"><div class="section-heading"><div><h2>定时路由追踪</h2><p class="subtle">' +
+  const header = warning + '<section class="surface"><div class="section-heading"><div><h2>定时路由追踪</h2><p class="subtle">' +
     (data.enabled ? "每 " + escape(routeInterval(data.minutes)) : "已关闭") + " · 回程端 " + badge(status[data.runner] ?? status.pending) +
     '</p>' + runnerVersion + updateAvailable(data.runner_update_available) + updateStatus(data.runner_update) +
-    manualRouteStatus(data.manual) + '</div><div class="node-actions">' + traceControl +
+    manualRouteStatus(target.id, manual) + '</div><div class="node-actions">' + traceControl +
     action("路由设置", "route-settings", target.id) +
     (data.runner === "pending" ? action("部署回程端", "return-install", target.id) :
       action("更新回程端", "show-return-update", target.id) + action("解绑回程端", "return-remove", target.id, false, true)) +
     "</div></div></section>";
-  if (!data.enabled && !data.manual && !data.routes.length) return header;
+  if (!data.enabled && !manual && !data.routes.length) return header;
   const probe = state.data.nodes.find(node => node.id === routeView.probe) ?? state.data.nodes[0];
   if (!probe) return header + '<p class="empty">请先添加探针节点</p>';
   const { direction, family } = routeView;
@@ -544,6 +556,14 @@ async function mailDialog() {
     mailEvents.map(([key, label]) => check(key, label, selected.has(key))).join("") + '</div></fieldset></div>' +
     '<p class="form-message" role="status" data-error></p><div class="dialog-actions">' +
     '<button type="submit" class="action" value="test">发送测试邮件</button> <button type="submit" class="action primary">保存设置</button></div></form>');
+  const form = dialog.querySelector('[data-form="mail"]');
+  const feedback = form.querySelector("[data-error]");
+  form.addEventListener("input", () => {
+    if (!feedback.hasAttribute("data-test-feedback")) return;
+    feedback.removeAttribute("data-test-feedback");
+    feedback.textContent = "";
+    feedback.classList.remove("status-success");
+  });
 }
 async function submitMail(form, testing) {
   const data = new FormData(form);
@@ -560,9 +580,12 @@ async function submitMail(form, testing) {
   for (const button of [...buttons, close]) button.disabled = true;
   feedback.textContent = "";
   feedback.classList.remove("status-success");
+  feedback.toggleAttribute("data-test-feedback", testing);
   try {
     await api(testing ? "mail/test" : "mail", testing ? "POST" : "PUT", cfg);
+    if (!form.isConnected || !dialog.open) return;
     if (testing) {
+      if (!feedback.hasAttribute("data-test-feedback")) return;
       feedback.textContent = "测试邮件已提交给 SMTP 服务器。";
       feedback.classList.add("status-success");
     } else {
@@ -572,7 +595,7 @@ async function submitMail(form, testing) {
     }
   } catch (err) {
     if (err.status === 401) showLogin("登录已过期，请重新登录。");
-    else feedback.textContent = err.message;
+    else if (form.isConnected && dialog.open && (!testing || feedback.hasAttribute("data-test-feedback"))) feedback.textContent = err.message;
   } finally {
     for (const button of [...buttons, close]) button.disabled = false;
   }
@@ -713,21 +736,57 @@ function updateStatus(task, showSuccess = false) {
     '<span class="subtle">' + escape(task.version) + "</span></div>";
 }
 function showUpdateDialog(item, back = false) {
-  const data = routeView.data;
-  const supported = back ? data?.runner_managed_updates : item.managed_updates;
-  const installed = back ? data?.runner_version : item.version;
-  const task = back ? data?.runner_update : item.update;
-  const busy = task?.status === "queued" || task?.status === "running";
   const title = back ? "更新回程端" : "更新探针";
-  const help = supported ? "在主机上安装配置的发行版。更新完成后程序会自动重启。" :
-    "请先在主机上运行手动更新命令，升级到支持后台更新的版本。";
   const manual = action("手动更新命令", back ? "return-update" : "update-command", item.id);
   openDialog(title, item.name,
     '<form data-form="' + (back ? "queue-return-update" : "queue-node-update") +
-    '" data-id="' + escape(item.id) + '"><p>' + help + '</p>' +
-    (installed ? '<p class="subtle">当前版本 ' + escape(installed) + '</p>' : '') + updateStatus(task, true) +
+    '" data-id="' + escape(item.id) + '"><p data-update-help></p><p class="subtle" data-current-version hidden></p>' +
+    '<div role="status" data-update-status></div><p class="form-message" role="status" data-update-load-error></p>' +
     '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' + manual +
-    (supported && !busy ? '<button type="submit" class="action primary">开始更新</button>' : '') + '</div></form>');
+    '<button type="submit" class="action primary" disabled hidden>开始更新</button></div></form>');
+  syncUpdateDialog();
+}
+function currentUpdateDialog() {
+  return dialog.open ? dialog.querySelector('[data-form="queue-node-update"], [data-form="queue-return-update"]') : null;
+}
+function syncUpdateDialog(loadError = "") {
+  const form = currentUpdateDialog();
+  if (!form) return;
+  const start = form.querySelector('[type="submit"]');
+  // A visible disabled button means the update request is being submitted.
+  if (!start.hidden && start.disabled) return;
+  const { id } = form.dataset;
+  const back = form.dataset.form === "queue-return-update";
+  form.querySelector("[data-update-load-error]").textContent = loadError || (back ? routeView.error : "");
+  if (loadError || (back && routeView.error)) return;
+  const data = back ? routeView.data : state.data?.nodes.find(node => node.id === id);
+  if (!data || (back && data.runner === "pending")) {
+    dialog.close();
+    message(back ? "回程端已解绑。" : "探针节点已移除。");
+    return;
+  }
+  const supported = back ? data.runner_managed_updates : data.managed_updates;
+  const installed = back ? data.runner_version : data.version;
+  const task = back ? data.runner_update : data.update;
+  form.querySelector("[data-update-help]").textContent = supported ? "在主机上安装配置的发行版。更新完成后程序会自动重启。" :
+    "请先在主机上运行手动更新命令，升级到支持后台更新的版本。";
+  const version = form.querySelector("[data-current-version]");
+  version.textContent = installed ? "当前版本 " + installed : "";
+  version.hidden = !installed;
+  start.disabled = start.hidden = !supported || task?.status === "queued" || task?.status === "running";
+
+  const successUntil = task?.status === "succeeded" && wasTaskObserved(back ? "return-update" : "node-update", id, task)
+    ? task.success_until * 1000 : 0;
+  const status = form.querySelector("[data-update-status]");
+  const markup = updateStatus(task, successUntil > Date.now());
+  const completionID = successUntil && markup ? task.id : "";
+  if (status.innerHTML === markup && status.dataset.completionId === completionID) return;
+  status.dataset.completionId = completionID;
+  status.innerHTML = markup;
+  if (completionID) {
+    const feedback = status.firstElementChild;
+    window.setTimeout(() => feedback.remove(), Math.max(0, successUntil - Date.now()));
+  }
 }
 function routeEndpoint(id, operation = "routes") {
   return "targets/" + encodeURIComponent(id) + "/" + operation;
@@ -752,14 +811,20 @@ function removeReturnDialog(target) {
     '<p class="form-message" role="alert" data-error></p><div class="dialog-actions">' +
     action("取消", "close") + '<button type="submit" class="action primary">确认解绑</button></div></form>');
 }
+let latestRouteLoad = 0;
 async function loadRoutes(id) {
+  const request = ++latestRouteLoad;
+  const view = routeView;
+  const current = () => request === latestRouteLoad && view === routeView && state.signedIn && state.view === "detail" && state.targetID === id;
   try {
     const data = await api(routeEndpoint(id));
-    if (!state.signedIn || state.view !== "detail" || state.targetID !== id) return;
+    if (!current()) return;
+    observeTask("trace", id, data.manual);
+    observeTask("return-update", id, data.runner_update);
     routeView.data = data;
     routeView.error = "";
   } catch (error) {
-    if (!state.signedIn || state.view !== "detail" || state.targetID !== id) return;
+    if (!current()) return;
     if (error.status === 401) return showLogin("登录已过期，请重新登录。");
     routeView.error = "无法读取路由：" + error.message;
   }
@@ -791,8 +856,10 @@ async function api(path, method = "GET", payload) {
 let latestRefresh = 0;
 function showLogin(text = "", success = false) {
   latestRefresh++;
+  latestRouteLoad++;
   state.signedIn = false;
   state.data = null;
+  observedTasks.clear();
   routeView.data = null;
   routeView.error = "";
   render();
@@ -805,14 +872,17 @@ async function refresh() {
     const data = await api(state.view === "nodes" ? "state?probe_version=1" : "state");
     if (request !== latestRefresh || rowDrag || reorderPending) return;
     state.data = { ...data, nodes: data.nodes ?? [], targets: data.targets ?? [], events: data.events ?? [] };
+    for (const node of state.data.nodes) observeTask("node-update", node.id, node.update);
     state.signedIn = true;
     message();
     if (state.view === "detail" && !state.data.targets.some(target => target.id === state.targetID)) {
+      if (currentUpdateDialog()) dialog.close();
       navigate("targets");
       return;
     }
     render();
     if (state.view === "detail" && routeView.panel !== "connectivity") await loadRoutes(state.targetID);
+    syncUpdateDialog();
   } catch (error) {
     if (request !== latestRefresh || rowDrag || reorderPending) return;
     if (error.status === 401) {
@@ -820,6 +890,7 @@ async function refresh() {
     } else {
       if (!state.signedIn && !content.querySelector("[data-form=login]")) render();
       message("无法读取管理端状态：" + error.message);
+      syncUpdateDialog("无法读取更新状态：" + error.message);
     }
   }
 }
@@ -930,7 +1001,8 @@ root.addEventListener("click", async event => {
     } else if (action === "trace-now" && target) {
       button.disabled = true;
       try {
-        await api(routeEndpoint(id, "routes/trace"), "POST");
+        const task = await api(routeEndpoint(id, "routes/trace"), "POST");
+        observeTask("trace", id, task);
         await loadRoutes(id);
       } finally {
         button.disabled = false;
@@ -975,7 +1047,8 @@ root.addEventListener("submit", async event => {
       await refresh();
     } else if (mode === "queue-node-update" || mode === "queue-return-update") {
       const back = mode === "queue-return-update";
-      await api(back ? routeEndpoint(id, "return-update") : "nodes/" + encodeURIComponent(id) + "/update", "POST");
+      const task = await api(back ? routeEndpoint(id, "return-update") : "nodes/" + encodeURIComponent(id) + "/update", "POST");
+      observeTask(back ? "return-update" : "node-update", id, task);
       dialog.close();
       if (back) await loadRoutes(id);
       else await refresh();
@@ -1114,5 +1187,5 @@ content.addEventListener("keydown", event => {
 restorePage();
 void refresh();
 window.setInterval(() => {
-  if (state.signedIn && !document.hidden && !dialog.open && !rowDrag && !reorderPending) void refresh();
+  if (state.signedIn && !document.hidden && !rowDrag && !reorderPending && (!dialog.open || currentUpdateDialog())) void refresh();
 }, 20000);

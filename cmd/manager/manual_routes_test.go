@@ -77,6 +77,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 		return adminTestRequest(t, s, http.MethodPost, path+"/trace", nil, http.StatusAccepted)
 	}
 	type progress struct {
+		ID          string `json:"id"`
 		State       string `json:"state"`
 		RequestedAt int64  `json:"requested_at"`
 		Done        int    `json:"done"`
@@ -109,7 +110,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 	if err := json.Unmarshal(start().Body.Bytes(), &running); err != nil {
 		t.Fatal(err)
 	}
-	if running.State != "running" || running.RequestedAt < now.Unix() || running.Total != 2 || running.Done != 0 {
+	if running.ID == "" || running.State != "running" || running.RequestedAt < now.Unix() || running.Total != 2 || running.Done != 0 {
 		t.Fatalf("unexpected initial manual trace progress: %+v", running)
 	}
 	readView(&running)
@@ -119,7 +120,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 		t.Fatalf("expected one job from each agent, got forward %+v and return %+v", forwardJobs, returnJobs)
 	}
 	forward, reverse := forwardJobs[0], returnJobs[0]
-	if forward.ManualID == "" || reverse.ManualID != forward.ManualID ||
+	if forward.ManualID != running.ID || reverse.ManualID != running.ID ||
 		forward.Direction != protocol.RouteOut || reverse.Direction != protocol.RouteBack ||
 		forward.Address != endpoint || reverse.Address != egress ||
 		forward.ProbeID != probeID || reverse.ProbeID != probeID || forward.TargetID != targetID || reverse.TargetID != targetID {

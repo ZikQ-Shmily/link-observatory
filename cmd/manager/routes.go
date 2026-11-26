@@ -429,7 +429,7 @@ func (s *server) targetRoutes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": target.Route.Enabled, "minutes": target.routeStep() / 60,
 		"runner": runner.returnRunnerStatus(now), "runner_id": runner.ID, "runner_version": runner.Version, "latest_probe_version": latest,
 		"runner_update_available": protocol.NewerVersion(available, runner.Version),
-		"runner_managed_updates":  runner.ManagedUpdates, "runner_update": runner.Update.view(now), "routes": results, "changes": changes, "egress_changes": state.EgressChanges,
+		"runner_managed_updates":  runner.ManagedUpdates, "runner_update": runner.updateView(now), "routes": results, "changes": changes, "egress_changes": state.EgressChanges,
 		"runner_ipv4": runner.egress(4, now.Unix()), "runner_ipv6": runner.egress(6, now.Unix()), "manual": target.ManualTrace.view(now.Unix())})
 }
 

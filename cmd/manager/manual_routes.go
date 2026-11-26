@@ -28,6 +28,7 @@ type manualRouteRound struct {
 }
 
 type manualRouteView struct {
+	ID          string `json:"id"`
 	State       string `json:"state"`
 	RequestedAt int64  `json:"requested_at"`
 	Done        int    `json:"done"`
@@ -51,7 +52,7 @@ func (round manualRouteRound) view(now int64) *manualRouteView {
 	} else if round.CompletedAt == 0 || now-round.CompletedAt >= manualTraceFeedbackTTL {
 		return nil
 	}
-	return &manualRouteView{State: state, RequestedAt: round.RequestedAt, Done: round.Done, Total: len(round.Jobs)}
+	return &manualRouteView{ID: round.ID, State: state, RequestedAt: round.RequestedAt, Done: round.Done, Total: len(round.Jobs)}
 }
 
 func (round manualRouteRound) appendPending(jobs []protocol.RouteJob, state diskState, target targetRecord, agent nodeRecord, now int64) []protocol.RouteJob {

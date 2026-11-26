@@ -7,17 +7,23 @@ import (
 	"link-observatory/internal/protocol"
 )
 
-const updateTimeout = 20 * time.Minute
+const (
+	updateTimeout            = 20 * time.Minute
+	updateSuccessFeedbackTTL = time.Minute
+)
 
 type updateTask struct {
-	Offer     protocol.UpdateOffer
-	Status    string
-	ExpiresAt int64
+	Offer       protocol.UpdateOffer
+	Status      string
+	ExpiresAt   int64
+	CompletedAt int64 `json:",omitempty"`
 }
 
 type updateView struct {
-	Version string `json:"version"`
-	Status  string `json:"status"`
+	ID           string `json:"id"`
+	Version      string `json:"version"`
+	Status       string `json:"status"`
+	SuccessUntil int64  `json:"success_until,omitempty"`
 }
 
 func (task updateTask) view(now time.Time) *updateView {
@@ -28,7 +34,23 @@ func (task updateTask) view(now time.Time) *updateView {
 	if (status == "queued" || status == "running") && now.Unix() >= task.ExpiresAt {
 		status = "expired"
 	}
-	return &updateView{Version: task.Offer.Version, Status: status}
+	view := &updateView{ID: task.Offer.ID, Version: task.Offer.Version, Status: status}
+	if status == "succeeded" {
+		view.SuccessUntil = task.CompletedAt + int64(updateSuccessFeedbackTTL/time.Second)
+		if task.CompletedAt == 0 || now.Unix() >= view.SuccessUntil {
+			return nil
+		}
+	}
+	return view
+}
+
+func (node nodeRecord) updateView(now time.Time) *updateView {
+	view := node.Update.view(now)
+	if view != nil && (view.Status == "failed" || view.Status == "expired") && node.Version != "" &&
+		(node.Version == view.Version || protocol.NewerVersion(node.Version, view.Version)) {
+		return nil
+	}
+	return view
 }
 
 func (s *server) queueUpdate(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +126,7 @@ func (s *server) pollUpdate(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case input.Version == task.Offer.Version:
 			task.Status = "succeeded"
+			task.CompletedAt = now.Unix()
 			node.Version = input.Version
 		case input.FailedID == task.Offer.ID:
 			task.Status = "failed"
