@@ -12,7 +12,8 @@ const dateOptions = { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit
 const dateFormat = new Intl.DateTimeFormat("zh-CN", dateOptions);
 const roundDateFormat = new Intl.DateTimeFormat("zh-CN", { ...dateOptions, year: "numeric" });
 const historySize = 12;
-let routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, data: null, error: "" };
+const mainViews = ["overview", "targets", "nodes", "events"];
+let routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, changeKey: "", focusChange: false, data: null, error: "" };
 let rowDrag = null;
 let reorderPending = false;
 
@@ -94,17 +95,16 @@ function counts(target, group, key) {
   const color = probes.length === 0 ? "quiet" : good === probes.length ? "ok" : good === 0 ? "bad" : "warn";
   return '<span class="probe mono ' + color + '">' + (probes.length ? good + "/" + probes.length : "—") + "</span>";
 }
-function targetTable(editable = false) {
+function targetTable() {
   const rows = state.data.targets.map(target => {
     const verdict = verdicts[target.verdict] ?? verdicts.insufficient;
     return '<tr data-state="' + verdict[0] + '"><td>' +
-      (editable ? '<div class="reorder-name">' + reorderGrip(target) + '<div>' + targetLink(target) + '</div></div>' : targetLink(target)) + '</td>' +
+      '<div class="reorder-name">' + reorderGrip(target) + '<div>' + targetLink(target) + '</div></div></td>' +
       cell("大陆 TCPing", counts(target, "mainland", "tcp")) + cell("大陆 ICMP", counts(target, "mainland", "icmp")) +
       cell("境外 TCPing", counts(target, "overseas", "tcp")) + cell("境外 ICMP", counts(target, "overseas", "icmp")) +
-      cell("当前判定", badge(verdict)) + (editable ? cell("操作", action("编辑", "edit-target", target.id, false, true)) : "") + "</tr>";
+      cell("当前判定", badge(verdict)) + cell("操作", action("编辑", "edit-target", target.id, false, true)) + "</tr>";
   });
-  const headers = ["目标", "大陆 TCPing", "大陆 ICMP", "境外 TCPing", "境外 ICMP", "当前判定"];
-  if (editable) headers.push("操作");
+  const headers = ["目标", "大陆 TCPing", "大陆 ICMP", "境外 TCPing", "境外 ICMP", "当前判定", "操作"];
   return table("监测目标", headers, rows, "target-table");
 }
 function recentRounds(target) {
@@ -160,6 +160,7 @@ function selectRound(at) {
   const round = target && recentRounds(target).find(item => item.at === at);
   if (!round) return;
   state.roundAt = at;
+  rememberPage();
   for (const button of content.querySelectorAll('[data-action="round-detail"]')) {
     button.setAttribute("aria-pressed", String(button.dataset.id === at));
   }
@@ -176,8 +177,31 @@ function overview() {
     action("添加目标", "target-form", "", true) + action("部署节点", "node-form") +
     '</div></section>' +
     '<dl class="metrics">' + metric("监测目标", state.data.targets.length) + metric("活跃异常", active, "num-alert") +
-    metric("在线节点", online + " <small>/ " + state.data.nodes.length + "</small>") + '</dl><div class="overview-results">' +
-    targetTable() + "</div>";
+    metric("在线探针", online + " <small>/ " + state.data.nodes.length + "</small>") + "</dl>" +
+    routeOverview(state.data.route_overview);
+}
+function routeOverview(data) {
+  const { enabled_targets = 0, online_runners = 0, deployed_runners = 0, latest_trace_at = 0, changes = [] } = data ?? {};
+  const latest = latest_trace_at ? escape(routeTime(latest_trace_at)) + ' <small>北京时间</small>' : "—";
+  const summary = '<section class="surface"><div class="section-heading"><h2>路由概况</h2></div>' +
+    '<dl class="route-overview-metrics"><div><dt>已启用定时追踪</dt><dd><span class="mono">' + escape(enabled_targets) +
+    '</span> <small>/ ' + state.data.targets.length + ' 个目标</small></dd></div><div><dt>在线回程端</dt><dd>' +
+    '<span class="mono' + (online_runners ? " ok" : "") + '">' + escape(online_runners) + '</span> <small>台 · 已部署 ' +
+    escape(deployed_runners) + ' 台</small></dd></div><div><dt>最近一次追踪</dt><dd class="route-overview-time">' +
+    latest + '</dd></div></dl></section>';
+  const rows = (changes ?? []).map(change => {
+    const key = routeChangeKey(change.target_id, change.probe_id, change.direction, change.family, change.window, change.at);
+    const direction = change.direction === "back" ? "回程" : "去程";
+    const hops = change.hops?.length ? "第 " + change.hops.join("、") + " 跳" : "—";
+    return '<li><button type="button" class="route-feed-row route-feed-entry" data-action="route-overview-change" data-id="' +
+      escape(change.target_id) + '" data-change-key="' + escape(key) + '"><span class="mono">' + escape(routeTime(change.at)) +
+      '</span><strong>' + escape(change.target_name) + '</strong><span>' + escape(change.probe_name) + '</span><span>' +
+      escape(direction + " · IPv" + change.family) + '</span><span>' + escape(hops) + '</span><span class="route-feed-arrow" aria-hidden="true">›</span></button></li>';
+  }).join("");
+  return summary + '<section class="surface"><div class="section-heading"><h2>最近路由变化</h2><span class="subtle">北京时间</span></div>' +
+    (rows ? '<div class="route-feed-row route-feed-columns" aria-hidden="true">' +
+      '<span>时间</span><span>目标</span><span>探针</span><span>方向 / IP</span><span>变化跳点</span></div>' +
+      '<ol class="route-feed">' + rows + '</ol>' : '<p class="empty">暂无路由变化</p>') + '</section>';
 }
 function probe(probe, protocol) {
   if (!probe) return badge(["quiet", "待测量"]);
@@ -193,14 +217,19 @@ function egressLines(node) {
     '<code class="target-address">出口 IPv' + family + " " + escape(node["egress_ipv" + family]) + "</code>"
   ).join("") || '<span class="target-address">出口 IP 未获取</span>';
 }
-function routeChoice(label, name, value, selected) {
-  return action(label, name, String(value)).replace(' type="button"', ' type="button" aria-pressed="' + selected + '"');
+function routeChoice(label, name, value, selected, caption = "") {
+  const meta = caption ? '<span class="route-probe-meta">' + escape(caption) + '</span>' : "";
+  return '<button type="button" class="action' + (caption ? " route-probe-choice" : "") + '" aria-pressed="' + selected +
+    '" data-action="' + name + '" data-id="' + escape(value) + '">' + meta + escape(label) + '</button>';
 }
 function routeTime(seconds) {
   return time(seconds ? seconds * 1000 : null);
 }
 function hopLabels(hops) {
   return hops.map(hop => escape(hop.ip + (hop.asn ? " · " + hop.asn : ""))).join("<br>");
+}
+function routeChangeKey(target, probe, direction, family, window, at) {
+  return JSON.stringify([target, probe, direction, family, window, at]);
 }
 const routeErrors = {
   "target has no resolved address for this family": "目标未解析到此协议的地址。",
@@ -233,6 +262,7 @@ function routeChanges(data) {
     const job = change.job;
     return {
       at: change.at,
+      selected: routeView.changeKey === routeChangeKey(job.target_id, job.probe_id, job.direction, job.family, job.window, change.at),
       label: job.direction === "back" ? "回程路由变化" : "去程路由变化",
       probe: (nodes.get(job.probe_id) || job.probe_id) + " · IPv" + job.family,
       detail: '<code>' + escape(change.destination_ip) + '</code>' +
@@ -249,7 +279,8 @@ function routeChanges(data) {
   }
   changes.sort((a, b) => b.at - a.at);
   return table("变化记录", ["事件", "探针", "变化", "时间（北京时间）"], changes.map(change =>
-    "<tr><td>" + escape(change.label) + "</td>" + cell("探针", escape(change.probe)) +
+    (change.selected ? '<tr data-selected-route-change tabindex="-1">' : "<tr>") +
+    "<td>" + escape(change.label) + "</td>" + cell("探针", escape(change.probe)) +
     cell("变化", change.detail) + cell("时间", escape(routeTime(change.at))) + "</tr>"), "route-table");
 }
 function routeInterval(minutes) {
@@ -289,14 +320,16 @@ function routePanel(target) {
   const result = data.routes.find(({ job }) => job.probe_id === probe.id && job.direction === direction && job.family === family);
   const back = direction === "back";
   const egress = probe["egress_ipv" + family];
-  const from = back ? (data["runner_ipv" + family] || target.ip) : (egress || probe.name);
-  const to = back ? egress : (result?.destination_ip || target.ip);
+  const from = back ? data["runner_ipv" + family] : egress;
+  const literalTarget = family === 4 ? /^(?:\d{1,3}\.){3}\d{1,3}$/.test(target.ip) : target.ip.includes(":");
+  const to = back ? egress : (result?.destination_ip || (literalTarget ? target.ip : ""));
   const matchingResult = result && (!back || to === result.job.address) ? result : null;
   const lastChange = matchingResult && data.changes.find(item => item.job.probe_id === probe.id &&
     item.job.generation === matchingResult.job.generation && item.job.direction === direction &&
     item.job.family === family && item.destination_ip === matchingResult.destination_ip);
-  const probeList = state.data.nodes.map(node => routeChoice(node.name, "route-probe", node.id, node.id === probe.id)).join("");
-  const filters = '<div class="route-filters"><div class="node-actions" role="group" aria-label="探针">' + probeList +
+  const probeList = state.data.nodes.map(node => routeChoice(node.name, "route-probe", node.id, node.id === probe.id,
+    [node.location, node.isp].filter(Boolean).join(" · "))).join("");
+  const filters = '<div class="route-filters"><div class="node-actions route-probe-options" role="group" aria-label="探针">' + probeList +
     '</div><div class="node-actions" role="group" aria-label="方向和协议">' +
     routeChoice("去程", "route-direction", "out", !back) + routeChoice("回程", "route-direction", "back", back) +
     routeChoice("IPv4", "route-family", 4, family === 4) + routeChoice("IPv6", "route-family", 6, family === 6) + "</div></div>";
@@ -305,8 +338,9 @@ function routePanel(target) {
     back && !egress ? "尚未获得探针的公网 IPv" + family + " 出口。" :
     !back && !probe.route_ready ? "此探针的 NextTrace 尚不可用。" : "等待首轮追踪。";
   return header + filters + '<section class="surface"><div class="section-heading"><div><h2>' +
-    (back ? "回程" : "去程") + " · IPv" + family + '</h2><p class="subtle"><code>' + escape(matchingResult?.job.source_ip || from) + " → " +
-    escape(to || "等待出口 IP") + '</code></p></div><div>' +
+    (back ? "回程" : "去程") + " · IPv" + family + '</h2><p class="subtle"><code>' +
+    escape(matchingResult?.job.source_ip || from || "等待出口 IP") + " → " +
+    escape(to || (back ? "等待出口 IP" : "等待解析 IP")) + '</code></p></div><div>' +
     (matchingResult ? '<p class="subtle">' + escape(routeTime(matchingResult.job.window)) + " · 北京时间" + (matchingResult.job.manual_id ? " · 手动追踪" : "") + "</p>" : "") +
     (matchingResult && !matchingResult.error ? badge(reached ? ["ok", "已到达目标"] : ["quiet", "未观测到目标回包"]) : "") +
     (lastChange ? action("最近变化 " + routeTime(lastChange.at), "detail-panel", "changes", false, true) : "") +
@@ -397,7 +431,7 @@ function render() {
     if (button.dataset.view === current) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
   }
-  if (state.view === "targets") content.innerHTML = heading("监测目标", "可达节点 / 有效节点", action("添加目标", "target-form", "", true)) + targetTable(true);
+  if (state.view === "targets") content.innerHTML = heading("监测目标", "可达节点 / 有效节点", action("添加目标", "target-form", "", true)) + targetTable();
   else if (state.view === "nodes") content.innerHTML = nodes();
   else if (state.view === "events") content.innerHTML = events();
   else if (state.view === "detail") {
@@ -415,12 +449,53 @@ function render() {
       const focus = buttons.find(button => button.dataset.id === focusedAt) ?? buttons.find(button => button.getAttribute("aria-pressed") === "true");
       focus?.focus({ preventScroll: true });
     }
-  } else content.innerHTML = overview();
+    if (active?.hasAttribute("data-selected-route-change")) {
+      content.querySelector("[data-selected-route-change]")?.focus({ preventScroll: true });
+    }
+  } else {
+    const focusedChange = document.activeElement?.dataset?.changeKey;
+    content.innerHTML = overview();
+    if (focusedChange) focusOverviewChange(focusedChange, { preventScroll: true });
+  }
+}
+function restorePage() {
+  const page = window.history.state?.linkObservatoryPage;
+  if (!page) return;
+  if (mainViews.includes(page.view)) {
+    state.view = page.view;
+  } else if (page.view === "detail" && typeof page.targetID === "string" && page.targetID) {
+    state.view = "detail";
+    state.previous = mainViews.includes(page.previous) ? page.previous : "targets";
+    state.targetID = page.targetID;
+    state.roundAt = typeof page.roundAt === "string" ? page.roundAt : "";
+    if (["connectivity", "routes", "changes"].includes(page.panel)) routeView.panel = page.panel;
+    if (typeof page.probe === "string") routeView.probe = page.probe;
+    if (page.direction === "back") routeView.direction = "back";
+    if (page.family === 6) routeView.family = 6;
+    if (typeof page.changeKey === "string") routeView.changeKey = page.changeKey;
+  }
+}
+function rememberPage() {
+  const { view, previous, targetID, roundAt } = state;
+  const { panel, probe, direction, family, changeKey } = routeView;
+  const page = view === "detail" ? { view, previous, targetID, roundAt, panel, probe, direction, family, changeKey } : { view };
+  window.history.replaceState({ ...window.history.state, linkObservatoryPage: page }, "");
 }
 function navigate(view) {
   state.view = view;
+  rememberPage();
   render();
   if (view === "nodes" || view === "detail") void refresh();
+}
+function openTarget(id, panel = "connectivity", changeKey = "") {
+  state.previous = state.view;
+  state.targetID = id;
+  state.roundAt = "";
+  routeView = { panel, probe: "", direction: "out", family: 4, changeKey, focusChange: Boolean(changeKey), data: null, error: "" };
+  navigate("detail");
+}
+function focusOverviewChange(key, options) {
+  [...content.querySelectorAll("[data-change-key]")].find(button => button.dataset.changeKey === key)?.focus(options);
 }
 function message(text = "", success = false) {
   notice.textContent = text;
@@ -429,13 +504,13 @@ function message(text = "", success = false) {
 }
 function openDialog(title, subtitle, body) {
   dialog.innerHTML = '<header class="dialog-head"><div><h2 id="dialog-title">' + escape(title) +
-    '</h2><p class="subtle">' + escape(subtitle) + "</p></div>" + action("关闭", "close") +
+    '</h2>' + (subtitle ? '<p class="subtle">' + escape(subtitle) + "</p>" : "") + "</div>" + action("关闭", "close") +
     '</header><div class="dialog-body">' + body + "</div>";
   if (!dialog.open) dialog.showModal();
   else dialog.querySelector("button").focus();
 }
 function settingsDialog() {
-  openDialog("探测设置", "全局间隔由 v0.1.1 及以上的探针自动应用。",
+  openDialog("探测设置", "",
     '<form data-form="settings"><div class="form-fields">' +
     '<label>探测间隔（分钟）<input type="number" name="minutes" min="1" max="10" step="1" value="' +
     escape(intervalMinutes()) + '" required></label>' +
@@ -680,15 +755,19 @@ function removeReturnDialog(target) {
 async function loadRoutes(id) {
   try {
     const data = await api(routeEndpoint(id));
-    if (state.view !== "detail" || state.targetID !== id) return;
+    if (!state.signedIn || state.view !== "detail" || state.targetID !== id) return;
     routeView.data = data;
     routeView.error = "";
   } catch (error) {
-    if (state.view !== "detail" || state.targetID !== id) return;
+    if (!state.signedIn || state.view !== "detail" || state.targetID !== id) return;
     if (error.status === 401) return showLogin("登录已过期，请重新登录。");
     routeView.error = "无法读取路由：" + error.message;
   }
   if (routeView.panel !== "connectivity") render();
+  if (routeView.panel === "changes" && routeView.focusChange && routeView.data) {
+    routeView.focusChange = false;
+    content.querySelector("[data-selected-route-change]")?.focus();
+  }
 }
 function confirmRequest(kind, item) {
   const node = kind === "node";
@@ -713,9 +792,9 @@ let latestRefresh = 0;
 function showLogin(text = "", success = false) {
   latestRefresh++;
   state.signedIn = false;
-  state.view = state.previous = "overview";
-  state.targetID = state.roundAt = "";
   state.data = null;
+  routeView.data = null;
+  routeView.error = "";
   render();
   message(text, success);
   content.querySelector('[name="password"]').focus();
@@ -728,14 +807,16 @@ async function refresh() {
     state.data = { ...data, nodes: data.nodes ?? [], targets: data.targets ?? [], events: data.events ?? [] };
     state.signedIn = true;
     message();
+    if (state.view === "detail" && !state.data.targets.some(target => target.id === state.targetID)) {
+      navigate("targets");
+      return;
+    }
     render();
     if (state.view === "detail" && routeView.panel !== "connectivity") await loadRoutes(state.targetID);
   } catch (error) {
     if (request !== latestRefresh || rowDrag || reorderPending) return;
     if (error.status === 401) {
-      const canRender = state.signedIn || !content.querySelector("[data-form=login]");
-      state.signedIn = false;
-      if (canRender) render();
+      if (state.signedIn || !content.querySelector("[data-form=login]")) showLogin();
     } else {
       if (!state.signedIn && !content.querySelector("[data-form=login]")) render();
       message("无法读取管理端状态：" + error.message);
@@ -831,20 +912,20 @@ root.addEventListener("click", async event => {
     else if (action === "edit-target" && target) formDialog("target", target);
     else if (action === "edit-node" && node) formDialog("node", node);
     else if (action === "settings-form") settingsDialog();
-    else if (action === "back") navigate(state.previous);
-    else if (action === "detail" && target) {
-      state.previous = state.view;
-      state.targetID = id;
-      state.roundAt = "";
-      routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, data: null, error: "" };
-      navigate("detail");
-    } else if (action === "detail-panel") {
+    else if (action === "back") {
+      navigate(state.previous);
+      if (state.view === "overview" && routeView.changeKey) focusOverviewChange(routeView.changeKey);
+    } else if (action === "detail" && target) openTarget(id);
+    else if (action === "route-overview-change" && target) openTarget(id, "changes", button.dataset.changeKey);
+    else if (action === "detail-panel") {
       routeView.panel = id;
+      rememberPage();
       render();
       if (id !== "connectivity") await loadRoutes(state.targetID);
     } else if (action === "route-probe" || action === "route-direction" || action === "route-family") {
       const key = action.slice(6);
       routeView[key] = key === "family" ? Number(id) : id;
+      rememberPage();
       render();
     } else if (action === "trace-now" && target) {
       button.disabled = true;
@@ -918,13 +999,13 @@ root.addEventListener("submit", async event => {
       } else {
         const result = await api("nodes", "POST", values);
         state.view = "nodes";
+        rememberPage();
         showEnrollment(result);
       }
       await refresh();
     } else if (mode === "remove") {
       const kind = form.dataset.kind;
       await api((kind === "node" ? "nodes/" : "targets/") + encodeURIComponent(form.dataset.id), "DELETE");
-      if (kind === "target" && state.view === "detail") state.view = "targets";
       dialog.close();
       await refresh();
     }
@@ -1030,6 +1111,7 @@ content.addEventListener("keydown", event => {
   const index = state.data[list].findIndex(item => item.id === grip.dataset.reorder);
   void persistOrder(list, grip.dataset.reorder, index + (event.key === "ArrowUp" ? -1 : 1), true);
 });
+restorePage();
 void refresh();
 window.setInterval(() => {
   if (state.signedIn && !document.hidden && !dialog.open && !rowDrag && !reorderPending) void refresh();

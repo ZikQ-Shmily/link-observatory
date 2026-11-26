@@ -168,8 +168,6 @@
   #ip-monitor-console .metric dd { order: -1; font-size: 26px; font-weight: 500; letter-spacing: -.045em; line-height: 1.12; }
   #ip-monitor-console .metric dd small { font-size: 13px; color: var(--muted); }
   #ip-monitor-console .metric .num-alert { color: var(--danger); }
-  #ip-monitor-console .overview-results { padding: 14px; border-radius: 24px; background: var(--surface-soft); }
-  #ip-monitor-console .overview-results .surface { border-color: var(--line); }
   #ip-monitor-console .section-heading {
     display: flex;
     justify-content: space-between;
@@ -394,7 +392,6 @@
     #ip-monitor-console .metric dt { font-size: 11px; }
     #ip-monitor-console .metric dd { font-size: 23px; }
     #ip-monitor-console .metric dd small { font-size: 11px; }
-    #ip-monitor-console .overview-results { padding: 0; background: transparent; }
     #ip-monitor-console .section-heading { padding: 10px 12px; }
     #ip-monitor-console table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     #ip-monitor-console table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }
@@ -504,7 +501,23 @@ body { margin: 0; background: #fdfdfd; }
   background: var(--ink);
   border-color: var(--ink);
 }
+#ip-monitor-console .route-probe-options { gap: 6px 8px; min-width: 0; }
+#ip-monitor-console .action.route-probe-choice {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 54px;
+  max-width: 100%;
+  border-radius: 12px;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#ip-monitor-console .route-probe-meta { color: var(--muted); font-size: 11px; font-weight: 400; }
+#ip-monitor-console [aria-pressed="true"] .route-probe-meta { color: inherit; opacity: .85; }
 #ip-monitor-console .route-table { overflow-wrap: anywhere; }
+#ip-monitor-console [data-selected-route-change] { background: var(--surface-soft); outline: 1px solid var(--edge); outline-offset: -1px; }
 #ip-monitor-console .route-changes { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin-top: 8px; }
 #ip-monitor-console .route-changes dt { color: var(--muted); }
 #ip-monitor-console .route-changes dd { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
@@ -513,3 +526,62 @@ body { margin: 0; background: #fdfdfd; }
 
 #ip-monitor-console .route-interval-options { row-gap: 4px; }
 #ip-monitor-console .route-interval-options span { min-height: 42px; }
+
+#ip-monitor-console .route-overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+}
+#ip-monitor-console .route-overview-metrics > div { padding: 12px 18px 15px; }
+#ip-monitor-console .route-overview-metrics > div + div { border-inline-start: 1px solid var(--line); }
+#ip-monitor-console .route-overview-metrics :is(dt, small) { color: var(--muted); font-size: 12px; font-weight: 400; }
+#ip-monitor-console .route-overview-metrics dd { margin-top: 4px; font-size: 24px; font-weight: 600; line-height: 1.25; }
+#ip-monitor-console .route-overview-metrics .route-overview-time { font-size: 19px; font-variant-numeric: tabular-nums; }
+#ip-monitor-console .route-overview-time small { display: inline-block; }
+#ip-monitor-console .route-feed { margin: 0; padding: 0; list-style: none; }
+#ip-monitor-console .route-feed-row {
+  display: grid;
+  grid-template-columns: minmax(105px, .9fr) minmax(0, 2.3fr) minmax(75px, .85fr) minmax(74px, .75fr) minmax(75px, .8fr) 12px;
+  gap: 6px 10px;
+  align-items: center;
+  padding: 9px 18px;
+  overflow-wrap: anywhere;
+}
+#ip-monitor-console .route-feed-columns { border-top: 1px solid var(--line); background: var(--surface-soft); color: var(--muted); font-size: 12px; }
+#ip-monitor-console .route-feed li + li { border-top: 1px solid var(--line); }
+#ip-monitor-console .route-feed-entry {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+}
+#ip-monitor-console .route-feed li:last-child .route-feed-entry { border-radius: 0 0 11px 11px; }
+#ip-monitor-console .route-feed-entry:hover { background: var(--surface-soft); }
+#ip-monitor-console .route-feed-entry:focus-visible { outline-offset: -3px; }
+#ip-monitor-console .route-feed-entry strong { color: var(--ink); font-size: 13px; font-weight: 600; }
+#ip-monitor-console .route-feed-arrow { font-size: 18px; line-height: 1; }
+@media (max-width: 730px) {
+  #ip-monitor-console .route-feed-columns { display: none; }
+  #ip-monitor-console .route-feed-entry {
+    grid-template: "target target target arrow" "at probe direction hops" / minmax(80px, 1fr) minmax(56px, 1fr) minmax(63px, .85fr) minmax(42px, .75fr);
+  }
+  #ip-monitor-console .route-feed li:first-child { border-top: 1px solid var(--line); }
+  #ip-monitor-console .route-feed-entry > :nth-child(1) { grid-area: at; }
+  #ip-monitor-console .route-feed-entry > strong { grid-area: target; }
+  #ip-monitor-console .route-feed-entry > :nth-child(3) { grid-area: probe; }
+  #ip-monitor-console .route-feed-entry > :nth-child(4) { grid-area: direction; }
+  #ip-monitor-console .route-feed-entry > :nth-child(5) { grid-area: hops; }
+  #ip-monitor-console .route-feed-entry > .route-feed-arrow { grid-area: arrow; justify-self: end; }
+}
+@media (max-width: 430px) {
+  #ip-monitor-console .route-overview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #ip-monitor-console .route-overview-metrics > div { padding-inline: 12px; }
+  #ip-monitor-console .route-overview-metrics > div:last-child { grid-column: 1 / -1; border-inline-start: 0; border-top: 1px solid var(--line); }
+  #ip-monitor-console .route-feed-entry {
+    grid-template: "target target arrow" "at at at" "probe direction hops" / minmax(62px, 1fr) minmax(61px, 1fr) minmax(48px, .8fr);
+    padding-inline: 12px;
+  }
+}

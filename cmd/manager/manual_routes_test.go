@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -81,7 +82,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 		Done        int    `json:"done"`
 		Total       int    `json:"total"`
 	}
-	readView := func(want progress) []protocol.RouteResult {
+	readView := func(want *progress) []protocol.RouteResult {
 		t.Helper()
 		reply := adminTestRequest(t, s, http.MethodGet, path, nil, http.StatusOK)
 		var view struct {
@@ -92,7 +93,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 		if err := json.Unmarshal(reply.Body.Bytes(), &view); err != nil {
 			t.Fatal(err)
 		}
-		if view.Enabled || view.Manual == nil || *view.Manual != want {
+		if view.Enabled || !reflect.DeepEqual(view.Manual, want) {
 			t.Fatalf("unexpected route trace view: %s; want disabled periodic trace and %+v", reply.Body, want)
 		}
 		return view.Routes
@@ -111,7 +112,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 	if running.State != "running" || running.RequestedAt < now.Unix() || running.Total != 2 || running.Done != 0 {
 		t.Fatalf("unexpected initial manual trace progress: %+v", running)
 	}
-	readView(running)
+	readView(&running)
 
 	forwardJobs, returnJobs := poll(probeID), poll(runnerID)
 	if len(forwardJobs) != 1 || len(returnJobs) != 1 {
@@ -139,7 +140,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 	if repeat != running {
 		t.Fatalf("repeated start changed the in-flight request: %+v, expected %+v", repeat, running)
 	}
-	readView(running)
+	readView(&running)
 
 	reverseResult := protocol.RouteResult{
 		Job: reverse, IP: egress, Hops: []protocol.RouteHop{{TTL: 1, IP: egress}},
@@ -147,7 +148,7 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 	agentPost(runnerID, protocol.RouteResultPath, reverseResult, http.StatusNoContent)
 	agentPost(runnerID, protocol.RouteResultPath, reverseResult, http.StatusNoContent)
 	running.State, running.Done = "completed", 2
-	results := readView(running)
+	results := readView(&running)
 	if len(results) != 2 {
 		t.Fatalf("manual trace results missing from route view: %+v", results)
 	}
@@ -156,6 +157,21 @@ func TestManualTraceWhenPeriodicTracingDisabled(t *testing.T) {
 			t.Fatalf("route view presented an outdated result: %+v", result)
 		}
 	}
+	target = s.state.Targets[targetID]
+	target.ManualTrace.CompletedAt = time.Now().Unix() - manualTraceFeedbackTTL
+	s.state.Targets[targetID] = target
+	after := readView(nil)
+	if len(after) != len(results) {
+		t.Fatalf("route results were lost when completion feedback expired: %+v", after)
+	}
+	for _, result := range results {
+		if !slices.ContainsFunc(after, func(item protocol.RouteResult) bool { return reflect.DeepEqual(item, result) }) {
+			t.Fatalf("route result changed when completion feedback expired: %+v", result)
+		}
+	}
+	target.ManualTrace.CompletedAt = 0
+	s.state.Targets[targetID] = target
+	readView(nil)
 	if len(s.state.Routes) != 1 || !reflect.DeepEqual(s.state.Routes[key], baseline) || len(s.state.RouteChanges) != 0 {
 		t.Fatal("a manual trace altered the scheduled observations or baselines")
 	}

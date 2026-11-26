@@ -61,6 +61,19 @@ type routeChange struct {
 	Hops     []hopChange       `json:"hops"`
 }
 
+func (node nodeRecord) returnRunnerStatus(now time.Time) string {
+	switch {
+	case node.Credential == "":
+		return "pending"
+	case node.LastSeen == 0 || probeOffline(node, now):
+		return "offline"
+	case !node.RouteReady:
+		return "unavailable"
+	default:
+		return "online"
+	}
+}
+
 func (state diskState) lookupAgent(id string) (nodeRecord, bool) {
 	if node, ok := state.Nodes[id]; ok {
 		return node, true
@@ -409,22 +422,12 @@ func (s *server) targetRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	runner := state.RouteRunners[target.ReturnRunner]
 	now := time.Now()
-	status := "pending"
-	if runner.Credential != "" {
-		status = "offline"
-		if runner.LastSeen != 0 && !probeOffline(runner, now) {
-			status = "unavailable"
-			if runner.RouteReady {
-				status = "online"
-			}
-		}
-	}
 	var latest, available string
 	if runner.Version != "" {
 		latest, available = s.probeVersions(r.Context())
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": target.Route.Enabled, "minutes": target.routeStep() / 60,
-		"runner": status, "runner_id": runner.ID, "runner_version": runner.Version, "latest_probe_version": latest,
+		"runner": runner.returnRunnerStatus(now), "runner_id": runner.ID, "runner_version": runner.Version, "latest_probe_version": latest,
 		"runner_update_available": protocol.NewerVersion(available, runner.Version),
 		"runner_managed_updates":  runner.ManagedUpdates, "runner_update": runner.Update.view(now), "routes": results, "changes": changes, "egress_changes": state.EgressChanges,
 		"runner_ipv4": runner.egress(4, now.Unix()), "runner_ipv6": runner.egress(6, now.Unix()), "manual": target.ManualTrace.view(now.Unix())})

@@ -142,6 +142,10 @@ func TestProbeMailSendsOncePerHeartbeatTransition(t *testing.T) {
 			Samples: make(map[string]map[string]sampleSeries), ProbeIntervalSeconds: 60,
 		},
 	}
+	s.evaluateProbeAvailability(now.Add(-2 * time.Second))
+	if len(s.state.MailQueue) != 0 || s.state.Nodes["probe"].MailOfflineSince != 0 {
+		t.Fatal("probe was marked offline before missing heartbeats for three minutes")
+	}
 	s.evaluateProbeAvailability(now)
 	s.evaluateProbeAvailability(now)
 	for range 2 {
@@ -154,6 +158,18 @@ func TestProbeMailSendsOncePerHeartbeatTransition(t *testing.T) {
 	if len(s.state.MailQueue) != 2 || s.state.MailQueue[0].Notice.Kind != mailProbeOffline ||
 		s.state.MailQueue[1].Notice.Kind != mailProbeRecovery || s.state.Nodes["probe"].MailOfflineSince != 0 {
 		t.Fatalf("expected a single offline/recovery pair, got %+v", s.state.MailQueue)
+	}
+}
+
+func TestProbeRecoveryMailIncludesFullHeartbeatGap(t *testing.T) {
+	lastHeartbeat := time.Date(2026, 11, 26, 1, 39, 29, 0, beijing)
+	recovered := lastHeartbeat.Add(3*time.Minute + 33*time.Second)
+	// A queued recovery notice stores the threshold time and the new heartbeat.
+	notice := mailNotice{Kind: mailProbeRecovery, StartedAt: lastHeartbeat.Add(offlineAfter), At: recovered, LastSeen: recovered}
+	content := notificationContent(notice, "https://monitor.example.com")
+	want := []mailFact{{"最后心跳", "2026-11-26 01:39:29"}, {"恢复时间", "2026-11-26 01:43:02"}, {"离线时长", "3 分钟 33 秒"}}
+	if got := content.Facts[3:]; !slices.Equal(got, want) {
+		t.Fatalf("recovery mail facts = %v, want %v", got, want)
 	}
 }
 

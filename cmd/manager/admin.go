@@ -57,13 +57,14 @@ type targetView struct {
 }
 
 type adminView struct {
-	Nodes                []nodeView    `json:"nodes"`
-	Targets              []targetView  `json:"targets"`
-	Events               []eventRecord `json:"events"`
-	ProbeIntervalSeconds int           `json:"probe_interval_seconds"`
-	ProbeScheduleStart   int64         `json:"probe_schedule_start"`
-	ReleaseConfigured    bool          `json:"release_configured"`
-	LatestProbeVersion   string        `json:"latest_probe_version,omitempty"`
+	Nodes                []nodeView        `json:"nodes"`
+	Targets              []targetView      `json:"targets"`
+	Events               []eventRecord     `json:"events"`
+	RouteOverview        routeOverviewView `json:"route_overview"`
+	ProbeIntervalSeconds int               `json:"probe_interval_seconds"`
+	ProbeScheduleStart   int64             `json:"probe_schedule_start"`
+	ReleaseConfigured    bool              `json:"release_configured"`
+	LatestProbeVersion   string            `json:"latest_probe_version,omitempty"`
 }
 
 func describeNode(node nodeRecord, now time.Time) nodeView {
@@ -152,7 +153,7 @@ func (s *server) adminState(w http.ResponseWriter, r *http.Request) {
 	view := adminView{
 		Nodes: []nodeView{}, Targets: []targetView{}, Events: describeEvents(state),
 		ProbeIntervalSeconds: state.ProbeIntervalSeconds, ProbeScheduleStart: state.ScheduleStart,
-		ReleaseConfigured: s.cfg.cookieSecure,
+		ReleaseConfigured: s.cfg.cookieSecure, RouteOverview: describeRouteOverview(state, now),
 	}
 	for _, node := range state.Nodes {
 		view.Nodes = append(view.Nodes, describeNode(node, now))

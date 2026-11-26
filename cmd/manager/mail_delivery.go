@@ -147,6 +147,18 @@ func mailDuration(duration time.Duration) string {
 	return fmt.Sprintf("%d 小时 %d 分钟", hours, minutes%60)
 }
 
+func mailHeartbeatDuration(duration time.Duration) string {
+	duration = max(duration, 0).Truncate(time.Second)
+	seconds := int(duration / time.Second % 60)
+	if duration < time.Minute {
+		return fmt.Sprintf("%d 秒", seconds)
+	}
+	if seconds == 0 {
+		return mailDuration(duration)
+	}
+	return fmt.Sprintf("%s %d 秒", mailDuration(duration), seconds)
+}
+
 func formatReachability(count reachabilityCount) string {
 	return fmt.Sprintf("%d/%d", count.Reachable, count.Valid)
 }
@@ -210,8 +222,10 @@ func notificationContent(notice mailNotice, link string) mailContent {
 			content.Heading = notice.Name + "探针已恢复在线"
 			content.State = "离线 → 在线"
 			content.Summary = "管理端已重新收到该探针的心跳。"
-			content.Facts = append(content.Facts, mailFact{"开始离线", mailTime(notice.StartedAt)},
-				mailFact{"恢复时间", mailTime(notice.At)}, mailFact{"离线时长", mailDuration(notice.At.Sub(notice.StartedAt))})
+			// StartedAt is the offline threshold crossing time in stored notices.
+			lastHeartbeat := notice.StartedAt.Add(-offlineAfter)
+			content.Facts = append(content.Facts, mailFact{"最后心跳", mailTime(lastHeartbeat)},
+				mailFact{"恢复时间", mailTime(notice.At)}, mailFact{"离线时长", mailHeartbeatDuration(notice.At.Sub(lastHeartbeat))})
 		} else {
 			content.Subject = "[链路观测] 探针离线 · " + notice.Name
 			content.Heading = notice.Name + "探针已离线"

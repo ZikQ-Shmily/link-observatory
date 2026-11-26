@@ -8,7 +8,10 @@ import (
 	"link-observatory/internal/protocol"
 )
 
-const manualTraceTTL = int64(20 * time.Minute / time.Second)
+const (
+	manualTraceTTL         = int64(20 * time.Minute / time.Second)
+	manualTraceFeedbackTTL = int64(time.Minute / time.Second)
+)
 
 type manualRouteAssignment struct {
 	AgentID string            `json:"agent_id"`
@@ -19,6 +22,7 @@ type manualRouteAssignment struct {
 type manualRouteRound struct {
 	ID          string                           `json:"id"`
 	RequestedAt int64                            `json:"requested_at"`
+	CompletedAt int64                            `json:"completed_at,omitempty"`
 	Jobs        map[string]manualRouteAssignment `json:"jobs"`
 	Done        int                              `json:"done"`
 }
@@ -44,6 +48,8 @@ func (round manualRouteRound) view(now int64) *manualRouteView {
 		if round.active(now) {
 			state = "running"
 		}
+	} else if round.CompletedAt == 0 || now-round.CompletedAt >= manualTraceFeedbackTTL {
+		return nil
 	}
 	return &manualRouteView{State: state, RequestedAt: round.RequestedAt, Done: round.Done, Total: len(round.Jobs)}
 }
@@ -137,6 +143,9 @@ func (s *server) acceptManualTrace(w http.ResponseWriter, agent nodeRecord, resu
 	round.Jobs = maps.Clone(round.Jobs)
 	round.Jobs[key] = assignment
 	round.Done++
+	if round.Done == len(round.Jobs) {
+		round.CompletedAt = now
+	}
 	target.ManualTrace = round
 
 	next := s.state
