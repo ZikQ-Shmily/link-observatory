@@ -14,7 +14,7 @@ const roundDateFormat = new Intl.DateTimeFormat("zh-CN", { ...dateOptions, year:
 const historySize = 12;
 const mainViews = ["overview", "targets", "nodes", "events"];
 const observedTasks = new Map();
-let routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, changeKey: "", focusChange: false, data: null, error: "" };
+let routeView = { panel: "connectivity", probe: "", direction: "out", family: 4, changeKey: "", openChangeKey: null, focusChange: false, data: null, error: "" };
 let rowDrag = null;
 let reorderPending = false;
 
@@ -237,11 +237,12 @@ function routeChoice(label, name, value, selected, caption = "") {
 function routeTime(seconds) {
   return time(seconds ? seconds * 1000 : null);
 }
-function hopLabels(hops) {
-  return hops.map(hop => escape(hop.ip + (hop.asn ? " · " + hop.asn : ""))).join("<br>");
-}
 function routeChangeKey(target, probe, direction, family, window, at) {
   return JSON.stringify([target, probe, direction, family, window, at]);
+}
+function recordedRouteChangeKey(change) {
+  const { job, at } = change;
+  return routeChangeKey(job.target_id, job.probe_id, job.direction, job.family, job.window, at);
 }
 const routeErrors = {
   "target has no resolved address for this family": "目标未解析到此协议的地址。",
@@ -268,32 +269,59 @@ function routeHops(result) {
   }
   return table("路由跳点", ["跳", "IP", "延迟", "地区（仅供参考）", "ASN / 线路", "反向解析"], rows, "route-table");
 }
+function routeChangeHopList(hops) {
+  if (!hops?.length) return '<span class="subtle">无响应</span>';
+  return hops.map(hop => '<div class="route-change-hop"><code>' + escape(hop.ip || "未记录") + '</code><dl>' +
+    '<div><dt>地区</dt><dd>' + escape(hop.location || "未记录") + "</dd></div>" +
+    '<div><dt>ASN / 线路</dt><dd>' + escape([hop.asn, hop.network].filter(Boolean).join(" · ") || "未记录") +
+    "</dd></div></dl></div>").join("");
+}
+function routeChangeComparison(hops) {
+  if (!hops.length) return '<p class="empty">未记录变化跳点</p>';
+  return '<div class="route-change-comparison"><table aria-label="变化跳点前后对照">' +
+    '<colgroup><col class="route-change-ttl"><col><col></colgroup>' +
+    '<thead><tr><th scope="col">跳点</th><th scope="col">变化前</th><th scope="col">变化后</th></tr></thead><tbody>' +
+    hops.map(hop => '<tr><th scope="row">第 ' + escape(hop.ttl) + " 跳</th><td>" + routeChangeHopList(hop.before) +
+      "</td><td>" + routeChangeHopList(hop.after) + "</td></tr>").join("") + "</tbody></table></div>";
+}
+function routeChangeTimestamp(at) {
+  const date = new Date(at * 1000);
+  return at && Number.isFinite(date.valueOf()) ? '<time datetime="' + date.toISOString() + '">' +
+    escape(dateFormat.format(date)) + "</time>" : "<time>—</time>";
+}
+function routeChangeRecord(change, nodes, openKey) {
+  const { job, key, at } = change;
+  const probeID = job?.probe_id ?? change.probe_id;
+  const probe = (nodes.get(probeID) || probeID) + " · IPv" + (job?.family ?? change.family);
+  const label = !job ? "探针出口 IP 变化" : job.direction === "back" ? "回程路由变化" : "去程路由变化";
+  const destination = change.destination_ip ? "<span>目的 IP <code>" + escape(change.destination_ip) + "</code></span>" : "";
+  const event = '<span class="route-change-event"><strong>' + label + '</strong><span class="route-change-meta subtle"><span>' +
+    escape(probe) + "</span>" + destination + "</span></span>";
+  const timestamp = routeChangeTimestamp(at);
+  if (!job) return '<article class="route-change-record route-change-egress">' + event +
+    '<div class="route-change-egress-ips"><code>' + escape(change.before) + '</code> <span>→</span> <code>' +
+    escape(change.after) + "</code></div>" + timestamp + "</article>";
+  const open = key === openKey;
+  const hops = change.hops ?? [];
+  return '<details class="route-change-record" data-route-change="' + escape(key) + '"' + (open ? " open" : "") +
+    '><summary class="route-change-summary"' + (key === routeView.changeKey ? " data-selected-route-change" : "") + ">" +
+    event + '<span class="route-change-time subtle">' + timestamp + '<span>' + hops.length +
+    ' 个跳点变化</span><span class="route-change-chevron" aria-hidden="true"></span></span></summary>' +
+    (open ? routeChangeComparison(hops) : "") + "</details>";
+}
 function routeChanges(data) {
   const nodes = new Map(state.data.nodes.map(node => [node.id, node.name]));
-  const changes = data.changes.map(change => {
-    const job = change.job;
-    return {
-      at: change.at,
-      selected: routeView.changeKey === routeChangeKey(job.target_id, job.probe_id, job.direction, job.family, job.window, change.at),
-      label: job.direction === "back" ? "回程路由变化" : "去程路由变化",
-      probe: (nodes.get(job.probe_id) || job.probe_id) + " · IPv" + job.family,
-      detail: '<code>' + escape(change.destination_ip) + '</code>' +
-        '<dl class="route-changes">' + change.hops.map(hop => "<dt>第 " + hop.ttl + " 跳</dt><dd><code>" +
-        hopLabels(hop.before) + "</code><span> → </span><code>" + hopLabels(hop.after) + "</code></dd>").join("") + "</dl>"
-    };
-  });
-  for (const change of data.egress_changes ?? []) {
-    if (!nodes.has(change.probe_id)) continue;
-    changes.push({
-      at: change.at, label: "探针出口 IP 变化", probe: nodes.get(change.probe_id) + " · IPv" + change.family,
-      detail: '<code>' + escape(change.before) + ' → ' + escape(change.after) + '</code>'
-    });
-  }
+  const changes = (data.changes ?? []).map(change => ({ ...change, key: recordedRouteChangeKey(change) }));
+  changes.push(...(data.egress_changes ?? []).filter(change => nodes.has(change.probe_id)));
   changes.sort((a, b) => b.at - a.at);
-  return table("变化记录", ["事件", "探针", "变化", "时间（北京时间）"], changes.map(change =>
-    (change.selected ? '<tr data-selected-route-change tabindex="-1">' : "<tr>") +
-    "<td>" + escape(change.label) + "</td>" + cell("探针", escape(change.probe)) +
-    cell("变化", change.detail) + cell("时间", escape(routeTime(change.at))) + "</tr>"), "route-table");
+  const selected = changes.find(change => change.key === routeView.changeKey);
+  const opened = changes.find(change => change.key === routeView.openChangeKey);
+  const firstRoute = changes.find(change => change.job);
+  const openKey = routeView.openChangeKey === "" ? "" : (opened ?? selected ?? firstRoute)?.key;
+  return '<section class="surface route-change-log" aria-label="变化记录">' +
+    '<div class="section-heading"><h2>变化记录</h2><span class="subtle">北京时间</span></div>' +
+    (changes.length ? '<div class="route-change-list">' + changes.map(change => routeChangeRecord(change, nodes, openKey)).join("") +
+      "</div>" : '<p class="empty">暂无变化记录</p>') + "</section>";
 }
 function routeInterval(minutes) {
   return minutes >= 60 ? (minutes / 60) + " 小时" : minutes + " 分钟";
@@ -366,7 +394,7 @@ function routePanel(target) {
     escape(to || (back ? "等待出口 IP" : "等待解析 IP")) + '</code></p></div><div>' +
     (matchingResult ? '<p class="subtle">' + escape(routeTime(matchingResult.job.window)) + " · 北京时间" + (matchingResult.job.manual_id ? " · 手动追踪" : "") + "</p>" : "") +
     (matchingResult && !matchingResult.error ? badge(reached ? ["ok", "已到达目标"] : ["quiet", "未观测到目标回包"]) : "") +
-    (lastChange ? action("最近变化 " + routeTime(lastChange.at), "detail-panel", "changes", false, true) : "") +
+    (lastChange ? action("最近变化 " + routeTime(lastChange.at), "route-change-detail", recordedRouteChangeKey(lastChange), false, true) : "") +
     "</div></div>" +
     (!matchingResult || matchingResult.error ? '<p class="empty">' +
       escape(matchingResult?.error ? routeErrors[matchingResult.error] || matchingResult.error : waiting) + "</p>" : "") +
@@ -518,6 +546,7 @@ function render() {
     const active = document.activeElement;
     const focusedAt = active?.dataset?.action === "round-detail" ? active.dataset.id : "";
     const routeAction = ["route-probe", "route-direction", "route-family", "detail-panel"].includes(active?.dataset?.action) ? active.dataset.action : "";
+    const focusedChange = active?.closest(".route-change-summary")?.parentElement.dataset.routeChange;
     content.innerHTML = target ? detail(target) : heading("目标已移除", "", action("返回总览", "back"));
     if (routeAction) {
       [...content.querySelectorAll("[data-action]")].find(button => button.dataset.action === routeAction &&
@@ -528,9 +557,7 @@ function render() {
       const focus = buttons.find(button => button.dataset.id === focusedAt) ?? buttons.find(button => button.getAttribute("aria-pressed") === "true");
       focus?.focus({ preventScroll: true });
     }
-    if (active?.hasAttribute("data-selected-route-change")) {
-      content.querySelector("[data-selected-route-change]")?.focus({ preventScroll: true });
-    }
+    if (focusedChange) focusRouteChange(focusedChange);
   } else {
     const focusedChange = document.activeElement?.dataset?.changeKey;
     content.innerHTML = overview();
@@ -552,12 +579,13 @@ function restorePage() {
     if (page.direction === "back") routeView.direction = "back";
     if (page.family === 6) routeView.family = 6;
     if (typeof page.changeKey === "string") routeView.changeKey = page.changeKey;
+    if (typeof page.openChangeKey === "string") routeView.openChangeKey = page.openChangeKey;
   }
 }
 function rememberPage() {
   const { view, previous, targetID, roundAt } = state;
-  const { panel, probe, direction, family, changeKey } = routeView;
-  const page = view === "detail" ? { view, previous, targetID, roundAt, panel, probe, direction, family, changeKey } : { view };
+  const { panel, probe, direction, family, changeKey, openChangeKey } = routeView;
+  const page = view === "detail" ? { view, previous, targetID, roundAt, panel, probe, direction, family, changeKey, openChangeKey } : { view };
   window.history.replaceState({ ...window.history.state, linkObservatoryPage: page }, "");
 }
 function navigate(view) {
@@ -570,11 +598,15 @@ function openTarget(id, panel = "connectivity", changeKey = "") {
   state.previous = state.view;
   state.targetID = id;
   state.roundAt = "";
-  routeView = { panel, probe: "", direction: "out", family: 4, changeKey, focusChange: Boolean(changeKey), data: null, error: "" };
+  routeView = { panel, probe: "", direction: "out", family: 4, changeKey, openChangeKey: null, focusChange: Boolean(changeKey), data: null, error: "" };
   navigate("detail");
 }
 function focusOverviewChange(key, options) {
   [...content.querySelectorAll("[data-change-key]")].find(button => button.dataset.changeKey === key)?.focus(options);
+}
+function focusRouteChange(key) {
+  const record = [...content.querySelectorAll("[data-route-change]")].find(item => item.dataset.routeChange === key);
+  record?.querySelector("summary")?.focus({ preventScroll: true });
 }
 function message(text = "", success = false) {
   notice.textContent = text;
@@ -1102,11 +1134,17 @@ root.addEventListener("click", async event => {
       if (state.view === "overview" && routeView.changeKey) focusOverviewChange(routeView.changeKey);
     } else if (action === "detail" && target) openTarget(id);
     else if (action === "route-overview-change" && target) openTarget(id, "changes", button.dataset.changeKey);
-    else if (action === "detail-panel") {
-      routeView.panel = id;
+    else if (action === "detail-panel" || action === "route-change-detail") {
+      if (action === "route-change-detail") {
+        routeView.panel = "changes";
+        routeView.changeKey = routeView.openChangeKey = id;
+        routeView.focusChange = true;
+      } else {
+        routeView.panel = id;
+      }
       rememberPage();
       render();
-      if (id !== "connectivity") await loadRoutes(state.targetID);
+      if (routeView.panel !== "connectivity") await loadRoutes(state.targetID);
     } else if (action === "route-probe" || action === "route-direction" || action === "route-family") {
       const key = action.slice(6);
       routeView[key] = key === "family" ? Number(id) : id;
@@ -1254,6 +1292,17 @@ function scrollDrag() {
   markDrop(rowDrag);
   rowDrag.frame = requestAnimationFrame(scrollDrag);
 }
+content.addEventListener("click", event => {
+  const summary = event.target.closest(".route-change-summary");
+  if (!summary) return;
+  event.preventDefault();
+  const record = summary.parentElement;
+  const key = record.dataset.routeChange;
+  routeView.openChangeKey = record.open ? "" : key;
+  rememberPage();
+  render();
+  focusRouteChange(key);
+});
 content.addEventListener("pointerdown", event => {
   const grip = event.target.closest("[data-reorder]");
   if (!grip || !event.isPrimary || event.button !== 0 || rowDrag || reorderPending) return;
