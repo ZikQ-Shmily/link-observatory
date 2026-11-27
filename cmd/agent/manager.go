@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"link-observatory/internal/protocol"
@@ -160,6 +161,7 @@ func runMonitor(ctx context.Context, client managerClient) error {
 	var config protocol.Config
 	var lastWindow int64
 	var lastReportAt time.Time
+	var hostMetrics *atomic.Pointer[protocol.HostMetrics]
 	for ctx.Err() == nil {
 		var next protocol.Config
 		err := client.request(ctx, http.MethodGet, configPath, nil, &next, true)
@@ -167,6 +169,9 @@ func runMonitor(ctx context.Context, client managerClient) error {
 			err = configValid(next)
 			if err == nil {
 				config = next
+				if config.HostMetrics && hostMetrics == nil {
+					hostMetrics = watchHostMetrics(ctx)
+				}
 			}
 		}
 		if ctx.Err() != nil {
@@ -192,11 +197,17 @@ func runMonitor(ctx context.Context, client managerClient) error {
 			cancel()
 		}
 		if ctx.Err() == nil && (len(reports) > 0 || time.Since(lastReportAt) >= heartbeatInterval) {
+			var metrics *protocol.HostMetrics
+			if config.HostMetrics && hostMetrics != nil && time.Now().Unix() < config.ValidUntil {
+				metrics = hostMetrics.Load()
+			}
 			var err error
 			if len(reports) > 0 {
-				err = flushReports(ctx, client, &reports)
+				err = flushReports(ctx, client, &reports, metrics)
 			} else {
-				err = client.request(ctx, http.MethodPost, reportPath, newReport(), nil, true)
+				report := newReport()
+				report.Metrics = metrics
+				err = client.request(ctx, http.MethodPost, reportPath, report, nil, true)
 			}
 			if authFailure(err) {
 				return fmt.Errorf("probe credentials rejected: %w", err)
@@ -226,7 +237,7 @@ func storeQueue(reports []protocol.Report) {
 	}
 }
 
-func flushReports(parent context.Context, client managerClient, reports *[]protocol.Report) error {
+func flushReports(parent context.Context, client managerClient, reports *[]protocol.Report, metrics *protocol.HostMetrics) error {
 	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	queue := *reports
@@ -247,12 +258,16 @@ func flushReports(parent context.Context, client managerClient, reports *[]proto
 		}
 		report := queue[index]
 		report.Version = version
+		// Metrics describe the current host, not the potentially older probe round.
+		report.Metrics = metrics
 		if err := client.request(ctx, http.MethodPost, reportPath, report, nil, true); err != nil {
 			var status responseError
 			if !errors.As(err, &status) || status != http.StatusBadRequest && status != http.StatusUnprocessableEntity && status != http.StatusRequestEntityTooLarge {
 				return err
 			}
 			log.Printf("discard rejected report: %v", err)
+		} else {
+			metrics = nil
 		}
 		queue = append(queue[:index], queue[index+1:]...)
 	}

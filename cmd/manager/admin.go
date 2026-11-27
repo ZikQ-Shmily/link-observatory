@@ -32,6 +32,8 @@ type nodeView struct {
 	ICMPv6           bool        `json:"icmp_v6"`
 	ManageCommand    string      `json:"manage_command"`
 	UninstallCommand string      `json:"uninstall_command"`
+
+	Metrics *protocol.HostMetrics `json:"metrics,omitempty"`
 }
 
 type nodeEnrollment struct {
@@ -75,6 +77,7 @@ func describeNode(node nodeRecord, now time.Time) nodeView {
 		ManagedUpdates: node.ManagedUpdates, Update: node.updateView(now),
 		ManageCommand: manage, UninstallCommand: manage + " uninstall",
 		EgressIPv4: node.egress(4, now.Unix()), EgressIPv6: node.egress(6, now.Unix()), RouteReady: node.RouteReady,
+		Metrics: node.Metrics,
 	}
 	if node.LastSeen > 0 {
 		seen := time.Unix(node.LastSeen, 0).UTC()

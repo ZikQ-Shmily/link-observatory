@@ -4,6 +4,7 @@ package protocol
 import (
 	"net/netip"
 	"strings"
+	"time"
 )
 
 const (
@@ -107,6 +108,7 @@ type Config struct {
 	IntervalSeconds int      `json:"interval_seconds"`
 	ScheduleStart   int64    `json:"schedule_start,omitempty"`
 	ValidUntil      int64    `json:"valid_until"`
+	HostMetrics     bool     `json:"host_metrics,omitempty"`
 }
 
 type Probe struct {
@@ -126,10 +128,26 @@ type Result struct {
 }
 
 type Report struct {
-	Version string   `json:"version"`
-	ICMPv4  bool     `json:"icmp_v4"`
-	ICMPv6  bool     `json:"icmp_v6"`
-	Results []Result `json:"results"`
+	Version string       `json:"version"`
+	ICMPv4  bool         `json:"icmp_v4"`
+	ICMPv6  bool         `json:"icmp_v6"`
+	Results []Result     `json:"results"`
+	Metrics *HostMetrics `json:"metrics,omitempty"`
+}
+
+type HostMetrics struct {
+	ObservedAt time.Time       `json:"observed_at"`
+	OS         string          `json:"os,omitempty"`
+	Arch       string          `json:"arch,omitempty"`
+	CPUCores   int             `json:"cpu_cores,omitempty"`
+	CPUUsage   *float64        `json:"cpu_usage_percent,omitempty"`
+	Memory     *MetricCapacity `json:"memory,omitempty"`
+	Disk       *MetricCapacity `json:"disk,omitempty"`
+}
+
+type MetricCapacity struct {
+	TotalBytes uint64 `json:"total_bytes"`
+	UsedBytes  uint64 `json:"used_bytes"`
 }
 
 const (

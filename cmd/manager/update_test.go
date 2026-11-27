@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,161 @@ func TestManagedUpdateQueuesAndConfirmsPerInstance(t *testing.T) {
 		t.Fatal("repeat poll extended completion feedback")
 	}
 	queue("targets/target/return-update", http.StatusConflict)
+}
+
+func TestBatchManagedUpdatesQueueEligibleAgents(t *testing.T) {
+	s := newPasswordTestServer(t)
+	now := time.Now()
+	s.sessions["admin"] = now.Add(time.Hour)
+	const version, endpoint = "v2.2.0", "/api/admin/updates"
+	releaseURL := officialReleaseDownloadPrefix + version
+	s.cfg.releaseURL = releaseURL
+	s.cfg.installHash = strings.Repeat("a", 64)
+	ready := nodeRecord{ID: "probe-ready", LastSeen: now.Unix(), ManagedUpdates: true, Credential: "registered", Version: "v2.1.5"}
+	active := updateTask{Status: "running", ExpiresAt: now.Add(time.Minute).Unix()}
+	s.state.Nodes[ready.ID] = ready
+	addProbe := func(id string, edit func(*nodeRecord)) {
+		node := ready
+		node.ID = id
+		edit(&node)
+		s.state.Nodes[id] = node
+	}
+	addProbe("probe-active", func(node *nodeRecord) { node.Update = active })
+	addProbe("probe-current", func(node *nodeRecord) { node.Version = version })
+	addProbe("probe-newer", func(node *nodeRecord) { node.Version = "v2.3.0" })
+	addProbe("probe-offline", func(node *nodeRecord) { node.LastSeen = now.Add(-offlineAfter - time.Second).Unix() })
+	addProbe("probe-unseen", func(node *nodeRecord) { node.LastSeen = 0 })
+	addProbe("probe-legacy", func(node *nodeRecord) { node.ManagedUpdates = false })
+	addProbe("probe-pending", func(node *nodeRecord) { node.Credential = "" })
+	addProbe("probe-version-unknown", func(node *nodeRecord) { node.Version = "dev" })
+	runner := ready
+	runner.ID, runner.ReturnTarget = "runner-ready", "target"
+	orphan := runner
+	orphan.ID = "runner-orphan"
+	s.state.RouteRunners = map[string]nodeRecord{runner.ID: runner, orphan.ID: orphan}
+	s.state.Targets[runner.ReturnTarget] = targetRecord{Target: protocol.Target{ID: runner.ReturnTarget}, ReturnRunner: runner.ID}
+
+	handler := s.routes()
+	session := s.cookie("admin", 60)
+	passwordStatus(t, passwordRequest(handler, http.MethodPost, endpoint, s.cfg.publicURL, nil, nil), http.StatusUnauthorized)
+	passwordStatus(t, passwordRequest(handler, http.MethodPost, endpoint, "https://other.example.com", session, nil), http.StatusForbidden)
+	s.cfg.releaseURL = releaseURL + "-rc.1"
+	adminTestRequest(t, s, http.MethodPost, endpoint, nil, http.StatusConflict)
+	s.cfg.releaseURL = releaseURL
+
+	filename := s.filename
+	s.filename = filepath.Join(filepath.Dir(filename), "missing", "state.json")
+	adminTestRequest(t, s, http.MethodPost, endpoint, nil, http.StatusInternalServerError)
+	if s.state.Nodes[ready.ID].Update.Status != "" || s.state.RouteRunners[runner.ID].Update.Status != "" {
+		t.Fatal("uncommitted update tasks escaped into the running state")
+	}
+	s.filename = filename
+	queue := func(status int) bulkUpdateSummary {
+		t.Helper()
+		reply := adminTestRequest(t, s, http.MethodPost, endpoint, nil, status)
+		var summary bulkUpdateSummary
+		if err := json.Unmarshal(reply.Body.Bytes(), &summary); err != nil {
+			t.Fatal(err)
+		}
+		return summary
+	}
+	summary := queue(http.StatusAccepted)
+	skipped := summary.Skipped
+	if summary.Version != version || summary.Queued.Probes != 1 || summary.Queued.ReturnRunners != 1 ||
+		skipped.UpToDate != 2 || skipped.Active != 1 || skipped.Offline != 2 || skipped.Unsupported != 1 ||
+		skipped.Unregistered != 1 || skipped.VersionUnavailable != 1 {
+		t.Fatalf("unexpected batch summary: %+v", summary)
+	}
+	saved, err := loadState(filename, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeTask, runnerTask := saved.Nodes[ready.ID].Update, saved.RouteRunners[runner.ID].Update
+	for _, task := range []updateTask{probeTask, runnerTask} {
+		if task.Status != "queued" || !task.Batch || !task.Offer.Valid() || task.Offer.Version != version || task.Offer.InstallerSHA256 != s.cfg.installHash ||
+			task.ExpiresAt < now.Add(batchUpdateWait).Unix() {
+			t.Fatalf("invalid saved update task: %+v", task)
+		}
+	}
+	if probeTask.Offer.ID == runnerTask.Offer.ID || saved.RouteRunners[orphan.ID].Update.Status != "" {
+		t.Fatal("batch assigned a duplicate ID or queued an unbound return runner")
+	}
+	second := queue(http.StatusOK)
+	if second.Queued.Probes != 0 || second.Queued.ReturnRunners != 0 || second.Skipped.Active != 3 ||
+		s.state.Nodes[ready.ID].Update != probeTask || s.state.RouteRunners[runner.ID].Update != runnerTask || s.state.Nodes["probe-active"].Update != active {
+		t.Fatalf("retry queued or changed an active task: %+v", second)
+	}
+}
+
+func TestBatchManagedUpdatesSerializeClaims(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	queuedAt := now.Add(-updateTimeout - time.Minute)
+	const old, version = "v2.1.5", "v2.2.0"
+	makeAgent := func(id, returnTarget, key string, batch bool, start time.Time) nodeRecord {
+		offer := protocol.UpdateOffer{ID: strings.Repeat(key, 32), Version: version, InstallerSHA256: strings.Repeat("a", 64)}
+		return nodeRecord{ID: id, ReturnTarget: returnTarget, Version: old, Update: queuedUpdate(offer, start, batch)}
+	}
+	state := diskState{
+		Nodes: map[string]nodeRecord{
+			"batch":   makeAgent("batch", "", "b", true, queuedAt),
+			"single1": makeAgent("single1", "", "c", false, now),
+			"single2": makeAgent("single2", "", "d", false, now),
+		},
+		RouteRunners: map[string]nodeRecord{"runner": makeAgent("runner", "target", "e", true, queuedAt)},
+	}
+	poll := func(id, installed string, at time.Time) *protocol.UpdateOffer {
+		node, _ := state.lookupAgent(id)
+		offer := state.applyUpdatePoll(&node, protocol.UpdatePoll{Version: installed, Ready: true}, at)
+		state.setAgent(node)
+		return offer
+	}
+	if poll("single1", old, now) == nil || poll("single2", old, now) == nil {
+		t.Fatal("queued batch work prevented single-only claims")
+	}
+	if poll("batch", old, now) != nil {
+		t.Fatal("batch claimed while single updates were running")
+	}
+	if task := state.Nodes["batch"].Update; task.Status != "queued" || task.ExpiresAt != queuedAt.Add(batchUpdateWait).Unix() {
+		t.Fatalf("waiting batch task changed: %+v", task)
+	}
+	poll("single1", version, now)
+	poll("single2", version, now)
+	claimAt := now.Add(updateLockReleaseGrace)
+	if poll("batch", old, claimAt.Add(-time.Nanosecond)) != nil {
+		t.Fatal("batch claimed before the completed worker's lock release grace")
+	}
+	first := poll("batch", old, claimAt)
+	deadline := claimAt.Add(updateTimeout).Unix()
+	if first == nil || state.Nodes["batch"].Update.ExpiresAt != deadline {
+		t.Fatal("claim did not start a fresh execution deadline after waiting")
+	}
+	state.setAgent(makeAgent("single3", "", "f", false, claimAt))
+	if poll("runner", old, claimAt) != nil || poll("single3", old, claimAt) != nil {
+		t.Fatal("another agent claimed while the batch worker was running")
+	}
+	completedAt := claimAt.Add(time.Minute)
+	if resumed := poll("batch", old, completedAt); resumed == nil || *resumed != *first || state.Nodes["batch"].Update.ExpiresAt != deadline {
+		t.Fatal("running worker did not resume its original offer and deadline")
+	}
+	poll("batch", version, completedAt)
+	if poll("runner", old, completedAt) != nil || poll("single3", old, completedAt) != nil {
+		t.Fatal("agent claimed during the batch worker's lock release grace")
+	}
+	if poll("runner", old, completedAt.Add(updateLockReleaseGrace)) == nil {
+		t.Fatal("next batch task did not claim after the prior worker completed")
+	}
+}
+
+func TestBatchManagedUpdateSupersededByReportedVersion(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	offer := protocol.UpdateOffer{ID: strings.Repeat("b", 32), Version: "v2.2.0", InstallerSHA256: strings.Repeat("a", 64)}
+	node := nodeRecord{Version: "v2.1.5", Update: queuedUpdate(offer, now, true)}
+	const newer = "v2.3.0"
+	state := diskState{}
+	if assigned := state.applyUpdatePoll(&node, protocol.UpdatePoll{Version: newer, Ready: true}, now); assigned != nil ||
+		node.Version != newer || node.Update.Status != "superseded" || node.Update.Offer != offer || node.Update.view(now) != nil || node.Update.active(now) {
+		t.Fatalf("newer version did not retire the old batch offer: %+v", node)
+	}
 }
 
 func TestUpdateSuccessFeedbackExpires(t *testing.T) {

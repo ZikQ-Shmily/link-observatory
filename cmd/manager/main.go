@@ -202,6 +202,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("POST /api/admin/nodes", s.admin(s.addNode))
 	mux.HandleFunc("PUT /api/admin/nodes/{id}", s.admin(s.editNode))
 	mux.HandleFunc("POST /api/admin/nodes/{id}/token", s.admin(s.rotateToken))
+	mux.HandleFunc("POST /api/admin/updates", s.admin(s.queueAllUpdates))
 	mux.HandleFunc("POST /api/admin/nodes/{id}/update", s.admin(s.queueUpdate))
 	mux.HandleFunc("POST /api/admin/nodes/{id}/install-command", s.admin(s.nodeInstallCommand))
 	mux.HandleFunc("DELETE /api/admin/nodes/{id}", s.admin(s.deleteNode))
@@ -468,6 +469,7 @@ func (s *server) register(w http.ResponseWriter, r *http.Request) {
 	}
 	node.Credential, node.Version, node.LastSeen = digest(input.Credential), input.Version, now
 	node.Enrollment, node.TokenExpiry = "", 0
+	node.Metrics = nil
 	next := s.state
 	next.setAgent(node)
 	if s.commit(w, next) {
@@ -509,7 +511,8 @@ func (s *server) agentConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config := protocol.Config{
 		Targets: targets, IntervalSeconds: protocol.DefaultIntervalSeconds,
-		ValidUntil: time.Now().Add(10 * time.Minute).Unix(),
+		ValidUntil:  time.Now().Add(10 * time.Minute).Unix(),
+		HostMetrics: node.ReturnTarget == "",
 	}
 	if r.Header.Get(protocol.ScheduleHeader) == "1" {
 		config.IntervalSeconds = s.state.ProbeIntervalSeconds
@@ -529,10 +532,14 @@ func validProbe(p protocol.Probe) bool {
 }
 
 func (s *server) agentReport(w http.ResponseWriter, r *http.Request) {
-	var report protocol.Report
-	if !decodeJSON(w, r, &report, 768<<10) {
+	var input struct {
+		protocol.Report
+		Metrics json.RawMessage `json:"metrics"`
+	}
+	if !decodeJSON(w, r, &input, 768<<10) {
 		return
 	}
+	report := input.Report
 	now := time.Now().UTC()
 	minute := protocol.DefaultIntervalSeconds
 	latest := protocol.WindowStart(now.Unix(), minute) + int64(minute)
@@ -562,7 +569,9 @@ func (s *server) agentReport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	node.LastSeen = now.Unix()
+	previousHeartbeat := node.LastSeen
+	heartbeatAt := time.Now().UTC()
+	node.LastSeen = heartbeatAt.Unix()
 	node.ICMPv4, node.ICMPv6 = report.ICMPv4, report.ICMPv6
 	if report.Version != "" {
 		node.Version = report.Version
@@ -575,11 +584,16 @@ func (s *server) agentReport(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	node.Metrics = latestHostMetrics(node.Metrics, input.Metrics, heartbeatAt)
 	interval := next.ProbeIntervalSeconds
 	present := protocol.WindowStart(now.Unix(), interval)
 	next.Nodes = maps.Clone(next.Nodes)
 	if node.MailOfflineSince != 0 {
-		next.enqueueMail(probeNotice(node, mailProbeRecovery, now))
+		notice := probeNotice(node, mailProbeRecovery, heartbeatAt)
+		if previousHeartbeat > 0 {
+			notice.PreviousHeartbeat = time.Unix(previousHeartbeat, 0).UTC()
+		}
+		next.enqueueMail(notice)
 		node.MailOfflineSince = 0
 	}
 	next.Nodes[node.ID] = node

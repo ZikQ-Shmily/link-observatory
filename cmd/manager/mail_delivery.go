@@ -222,15 +222,22 @@ func notificationContent(notice mailNotice, link string) mailContent {
 			content.Heading = notice.Name + "探针已恢复在线"
 			content.State = "离线 → 在线"
 			content.Summary = "管理端已重新收到该探针的心跳。"
-			// StartedAt is the offline threshold crossing time in stored notices.
-			lastHeartbeat := notice.StartedAt.Add(-offlineAfter)
+			lastHeartbeat := notice.PreviousHeartbeat
+			if lastHeartbeat.IsZero() {
+				// Legacy notices stored the crossing time for the fixed threshold.
+				lastHeartbeat = notice.StartedAt.Add(-offlineAfter)
+			}
 			content.Facts = append(content.Facts, mailFact{"最后心跳", mailTime(lastHeartbeat)},
 				mailFact{"恢复时间", mailTime(notice.At)}, mailFact{"离线时长", mailHeartbeatDuration(notice.At.Sub(lastHeartbeat))})
 		} else {
 			content.Subject = "[链路观测] 探针离线 · " + notice.Name
 			content.Heading = notice.Name + "探针已离线"
 			content.State = "在线 → 离线"
-			content.Summary = "管理端已超过 3 分钟未收到该探针的心跳。"
+			delay := notice.StartedAt.Sub(notice.LastSeen)
+			if notice.LastSeen.IsZero() || delay <= 0 {
+				delay = offlineAfter
+			}
+			content.Summary = fmt.Sprintf("管理端已至少 %d 分钟未收到该探针的心跳。", delay/time.Minute)
 			content.Facts = append(content.Facts, mailFact{"最后心跳", mailTime(notice.LastSeen)},
 				mailFact{"发现时间", mailTime(notice.At)})
 		}

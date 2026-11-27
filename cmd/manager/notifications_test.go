@@ -173,6 +173,86 @@ func TestProbeRecoveryMailIncludesFullHeartbeatGap(t *testing.T) {
 	}
 }
 
+func TestProbeMailDelayAndRecoveryAfterSettingsChange(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	lastHeartbeat := now.Add(-5*time.Minute - 5*time.Second)
+	s := &server{
+		filename: filepath.Join(t.TempDir(), "state.json"),
+		state: diskState{
+			Mail: mailSettings{Enabled: true, Events: mailKinds, ProbeOfflineMinutes: 5},
+			Nodes: map[string]nodeRecord{
+				"probe": {ID: "probe", LastSeen: lastHeartbeat.Unix(), Credential: digest("credential")},
+				"short": {ID: "short", LastSeen: now.Add(-4 * time.Minute).Unix(), Credential: digest("credential")},
+			},
+			ProbeIntervalSeconds: 60,
+			Samples:              make(map[string]map[string]sampleSeries),
+		},
+	}
+	s.evaluateProbeAvailability(lastHeartbeat.Add(5*time.Minute - time.Second))
+	if len(s.state.MailQueue) != 0 || !probeOffline(s.state.Nodes["probe"], now) {
+		t.Fatal("operational status and mail delay were not evaluated independently")
+	}
+	s.evaluateProbeAvailability(lastHeartbeat.Add(5 * time.Minute))
+	if len(s.state.MailQueue) != 1 || s.state.MailQueue[0].Notice.ID != "probe" {
+		t.Fatalf("only the probe that reached the email delay should be notified: %+v", s.state.MailQueue)
+	}
+	if summary := notificationContent(s.state.MailQueue[0].Notice, "").Summary; !strings.Contains(summary, "5 分钟") {
+		t.Fatalf("offline email did not reflect the incident's delay: %s", summary)
+	}
+	// The open incident and queued mail survive a delay change and restart.
+	s.state.Mail.ProbeOfflineMinutes = 60
+	if err := writeState(s.filename, s.state); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadState(s.filename, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.state = loaded
+	for _, id := range []string{"short", "probe"} {
+		request := scheduleRequest(t, http.MethodPost, "/api/agent/report", protocol.Report{})
+		request.Header.Set("X-Node-ID", id)
+		response := httptest.NewRecorder()
+		s.routes().ServeHTTP(response, request)
+		passwordStatus(t, response, http.StatusNoContent)
+	}
+	if len(s.state.MailQueue) != 2 || s.state.MailQueue[1].Notice.Kind != mailProbeRecovery ||
+		s.state.MailQueue[1].Notice.ID != "probe" || s.state.Nodes["probe"].MailOfflineSince != 0 {
+		t.Fatalf("expected recovery for the original alert only: %+v", s.state.MailQueue)
+	}
+	notice := s.state.MailQueue[1].Notice
+	content := notificationContent(notice, "")
+	want := []mailFact{{"最后心跳", mailTime(lastHeartbeat)}, {"恢复时间", mailTime(notice.At)},
+		{"离线时长", mailHeartbeatDuration(notice.At.Sub(lastHeartbeat))}}
+	if got := content.Facts[3:]; !slices.Equal(got, want) {
+		t.Fatalf("recovery mail facts = %v, want %v", got, want)
+	}
+}
+
+func TestProbeOfflineMailSettingPersistsAndValidates(t *testing.T) {
+	s := newPasswordTestServer(t)
+	s.sessions["admin"] = time.Now().Add(time.Hour)
+	const endpoint = "/api/admin/mail"
+	get := func(value string) {
+		t.Helper()
+		response := adminTestRequest(t, s, http.MethodGet, endpoint, nil, http.StatusOK)
+		if !strings.Contains(response.Body.String(), `"probe_offline_minutes":`+value) {
+			t.Fatalf("unexpected mail settings: %s", response.Body)
+		}
+	}
+	get("3")
+	for _, minutes := range []int{0, -1, 61} {
+		adminTestRequest(t, s, http.MethodPut, endpoint, map[string]int{"probe_offline_minutes": minutes}, http.StatusBadRequest)
+	}
+	adminTestRequest(t, s, http.MethodPut, endpoint, map[string]int{"probe_offline_minutes": 12}, http.StatusNoContent)
+	adminTestRequest(t, s, http.MethodPut, endpoint, mailSettings{}, http.StatusNoContent)
+	get("12")
+	reloaded, err := loadState(s.filename, time.Now())
+	if err != nil || reloaded.Mail.ProbeOfflineMinutes != 12 {
+		t.Fatalf("mail delay did not survive reload: %d, %v", reloaded.Mail.ProbeOfflineMinutes, err)
+	}
+}
+
 func TestMailSettingsNeverReturnPassword(t *testing.T) {
 	now := time.Now()
 	s := &server{

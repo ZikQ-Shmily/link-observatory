@@ -69,7 +69,7 @@ func TestHeartbeatBeforeScheduleStarts(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(encoded)))}, nil
 		case "POST " + reportPath:
 			var report protocol.Report
-			if err := json.NewDecoder(req.Body).Decode(&report); err != nil || len(report.Results) != 0 {
+			if err := json.NewDecoder(req.Body).Decode(&report); err != nil || len(report.Results) != 0 || report.Metrics != nil {
 				t.Errorf("expected an empty heartbeat report, got %+v (%v)", report, err)
 			}
 			gotHeartbeat = true
@@ -82,5 +82,56 @@ func TestHeartbeatBeforeScheduleStarts(t *testing.T) {
 	})
 	if err := runMonitor(ctx, client); err != nil || !gotHeartbeat {
 		t.Fatalf("heartbeat received = %t, monitor error = %v", gotHeartbeat, err)
+	}
+}
+
+func TestFlushReportsSendsMetricsWithLatestReport(t *testing.T) {
+	t.Chdir(t.TempDir())
+	client := newManagerClient(credentials{Manager: "https://manager.example.com"})
+	sample := &protocol.HostMetrics{ObservedAt: time.Now().UTC(), CPUCores: 4}
+	queue := []protocol.Report{
+		{Results: []protocol.Result{{TargetID: "target", Window: 60}}},
+		{Results: []protocol.Result{{TargetID: "target", Window: 120}}},
+	}
+	attempts := 0
+	client.http.Transport = scheduleTransport(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		var received protocol.Report
+		if err := json.NewDecoder(req.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		if len(received.Results) != 1 {
+			t.Fatalf("expected queued reachability result: %+v", received)
+		}
+		if attempts == 1 {
+			if received.Results[0].Window != 120 || received.Metrics == nil || received.Metrics.CPUCores != sample.CPUCores ||
+				!received.Metrics.ObservedAt.Equal(sample.ObservedAt) {
+				t.Fatalf("expected current telemetry with newest report: %+v", received)
+			}
+		} else if received.Results[0].Window != 60 || received.Metrics != nil {
+			t.Fatalf("expected old reachability report without telemetry: %+v", received)
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+	})
+	if err := flushReports(context.Background(), client, &queue, sample); err != nil || attempts != 2 || len(queue) != 0 {
+		t.Fatalf("flushed = %d, queued = %d, error = %v", attempts, len(queue), err)
+	}
+}
+
+func TestFlushReportsDoesNotReplayPersistedMetrics(t *testing.T) {
+	t.Chdir(t.TempDir())
+	client := newManagerClient(credentials{Manager: "https://manager.example.com"})
+	queue := []protocol.Report{{Metrics: &protocol.HostMetrics{CPUCores: 32}}}
+	gotReport := false
+	client.http.Transport = scheduleTransport(func(req *http.Request) (*http.Response, error) {
+		gotReport = true
+		var received protocol.Report
+		if err := json.NewDecoder(req.Body).Decode(&received); err != nil || received.Metrics != nil {
+			t.Fatalf("cached telemetry must not be replayed: %+v (%v)", received, err)
+		}
+		return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody}, nil
+	})
+	if err := flushReports(context.Background(), client, &queue, nil); err != nil || !gotReport || len(queue) != 0 {
+		t.Fatalf("flushed = %t, queued = %d, error = %v", gotReport, len(queue), err)
 	}
 }

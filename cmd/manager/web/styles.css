@@ -124,6 +124,7 @@
   #ip-monitor-console .hero-actions .action:not(.primary):hover { background: var(--edge); }
   #ip-monitor-console h2 { font-size: 18px; font-weight: 600; }
   #ip-monitor-console .page-heading p { margin-top: 8px; font-size: 13px; }
+  #ip-monitor-console .page-heading .node-actions { row-gap: 6px; }
   #ip-monitor-console [data-page="detail"] .page-heading p { font-family: var(--mono); }
   #ip-monitor-console .subtle { color: var(--muted); font-size: 12px; }
   #ip-monitor-console .action {
@@ -210,6 +211,8 @@
     white-space: nowrap;
   }
   #ip-monitor-console .probe svg { width: 12px; height: 12px; }
+  #ip-monitor-console .reachability-summary { display: flex; flex-wrap: wrap; gap: 2px 9px; color: var(--muted); font-size: 12px; }
+  #ip-monitor-console .reachability-summary > span { white-space: nowrap; }
   #ip-monitor-console .ok { color: var(--success); }
   #ip-monitor-console .bad { color: var(--danger); }
   #ip-monitor-console .warn { color: var(--warning); }
@@ -523,6 +526,18 @@ body { margin: 0; background: #fdfdfd; }
 #ip-monitor-console .route-changes dd { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
 
 #ip-monitor-console .update-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; }
+
+#ip-monitor-console .node-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  overflow-wrap: anywhere;
+}
+#ip-monitor-console .node-detail-facts dt { color: var(--muted); font-size: 12px; }
+#ip-monitor-console .node-detail-facts dd { margin-top: 3px; }
+#ip-monitor-console .node-detail-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+#ip-monitor-console .node-detail-section h3 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+#ip-monitor-console .node-detail-section p + dl { margin-top: 8px; }
 
 #ip-monitor-console .route-interval-options { row-gap: 4px; }
 #ip-monitor-console .route-interval-options span { min-height: 42px; }

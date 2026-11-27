@@ -64,9 +64,9 @@ function heading(title, caption, buttons = "") {
 function cell(label, value) {
   return '<td><span class="mobile-label" aria-hidden="true">' + escape(label) + "</span>" + value + "</td>";
 }
-function table(label, headers, rows, extra = "") {
+function table(label, headers, rows, extra = "", header = "") {
   return '<section class="surface table-wide ' + extra + '" aria-label="' + escape(label) + '">' +
-    (rows.length ? "<table><thead><tr>" + headers.map(label => '<th scope="col">' + escape(label) + "</th>").join("") +
+    header + (rows.length ? "<table><thead><tr>" + headers.map(label => '<th scope="col">' + escape(label) + "</th>").join("") +
       "</tr></thead><tbody>" + rows.join("") + "</tbody></table>" :
       '<p class="empty">暂无' + escape(label) + "</p>") + "</section>";
 }
@@ -88,25 +88,36 @@ function isFresh(observation) {
   return observedAt >= (state.data.probe_schedule_start ?? 0) * 1000 &&
     Date.now() - observedAt <= freshnessMillis;
 }
-function counts(target, group, key) {
-  const online = new Set(state.data.nodes.filter(node => node.group === group && node.state === "online").map(node => node.id));
-  const probes = (target.latest ?? []).filter(item => online.has(item.node_id) && isFresh(item))
-    .map(item => item[key]).filter(probe => probe && !["error", "unavailable"].includes(probe.status));
+function reachabilityCount(observations, key) {
+  const probes = observations.map(item => item[key]).filter(probe => probe && !["error", "unavailable"].includes(probe.status));
   const good = probes.filter(probe => probe.status === "ok").length;
   const color = probes.length === 0 ? "quiet" : good === probes.length ? "ok" : good === 0 ? "bad" : "warn";
   return '<span class="probe mono ' + color + '">' + (probes.length ? good + "/" + probes.length : "—") + "</span>";
 }
-function targetTable() {
+function counts(target, group, key) {
+  const online = new Set(state.data.nodes.filter(node => node.group === group && node.state === "online").map(node => node.id));
+  return reachabilityCount((target.latest ?? []).filter(item => online.has(item.node_id) && isFresh(item)), key);
+}
+function overviewCounts(target, key) {
+  return '<span class="reachability-summary"><span>大陆 ' + counts(target, "mainland", key) +
+    '</span><span>境外 ' + counts(target, "overseas", key) + "</span></span>";
+}
+function targetTable(editable = true) {
   const rows = state.data.targets.map(target => {
     const verdict = verdicts[target.verdict] ?? verdicts.insufficient;
-    return '<tr data-state="' + verdict[0] + '"><td>' +
-      '<div class="reorder-name">' + reorderGrip(target) + '<div>' + targetLink(target) + '</div></div></td>' +
+    const link = targetLink(target);
+    const name = editable ? '<div class="reorder-name">' + reorderGrip(target) + '<div>' + link + '</div></div>' : link;
+    const results = editable ?
       cell("大陆 TCPing", counts(target, "mainland", "tcp")) + cell("大陆 ICMP", counts(target, "mainland", "icmp")) +
-      cell("境外 TCPing", counts(target, "overseas", "tcp")) + cell("境外 ICMP", counts(target, "overseas", "icmp")) +
-      cell("当前判定", badge(verdict)) + cell("操作", action("编辑", "edit-target", target.id, false, true)) + "</tr>";
+      cell("境外 TCPing", counts(target, "overseas", "tcp")) + cell("境外 ICMP", counts(target, "overseas", "icmp")) :
+      cell("TCPing", overviewCounts(target, "tcp")) + cell("ICMP", overviewCounts(target, "icmp"));
+    return '<tr data-state="' + verdict[0] + '"><td>' + name + '</td>' + results +
+      cell("当前判定", badge(verdict)) + (editable ? cell("操作", action("编辑", "edit-target", target.id, false, true)) : "") + "</tr>";
   });
-  const headers = ["目标", "大陆 TCPing", "大陆 ICMP", "境外 TCPing", "境外 ICMP", "当前判定", "操作"];
-  return table("监测目标", headers, rows, "target-table");
+  const headers = editable ? ["目标", "大陆 TCPing", "大陆 ICMP", "境外 TCPing", "境外 ICMP", "当前判定", "操作"] :
+    ["目标", "TCPing", "ICMP", "当前判定"];
+  const header = editable ? "" : '<div class="section-heading"><h2>目标可达性</h2><span class="subtle">可达节点 / 有效节点</span></div>';
+  return table("监测目标", headers, rows, "target-table", header);
 }
 function recentRounds(target) {
   return (target.history ?? []).slice(-historySize);
@@ -179,7 +190,7 @@ function overview() {
     '</div></section>' +
     '<dl class="metrics">' + metric("监测目标", state.data.targets.length) + metric("活跃异常", active, "num-alert") +
     metric("在线探针", online + " <small>/ " + state.data.nodes.length + "</small>") + "</dl>" +
-    routeOverview(state.data.route_overview);
+    targetTable(false) + routeOverview(state.data.route_overview);
 }
 function routeOverview(data) {
   const { enabled_targets = 0, online_runners = 0, deployed_runners = 0, latest_trace_at = 0, changes = [] } = data ?? {};
@@ -397,7 +408,7 @@ function nodes() {
     const controls = action("编辑", "edit-node", node.id, false, true) +
       deployment + action("移除节点", "remove-node", node.id, false, true);
     return '<tr><td><div class="reorder-name">' + reorderGrip(node) +
-      '<div><strong>' + escape(node.name) + '</strong><code class="target-address">' + escape(node.id) +
+      '<div>' + action(node.name, "node-details", node.id, false, true) + '<code class="target-address">' + escape(node.id) +
       (node.version ? " · " + agentVersion(node.version, state.data.latest_probe_version) : "") +
       "</code>" + updateAvailable(node.update_available) + updateStatus(node.update) + egressLines(node) + "</div></div></td>" +
       cell("运营商", escape(node.isp)) + cell("地区", escape(node.location)) +
@@ -407,8 +418,64 @@ function nodes() {
       '<td><div class="node-actions">' + controls + "</div></td></tr>";
   });
   const caption = "每 " + intervalMinutes() + " 分钟探测 · 默认启用 ICMP";
-  return heading("探针节点", caption, action("探测设置", "settings-form") + action("添加节点", "node-form", "", true)) +
+  const updateAll = state.data.release_configured ? action("一键更新", "batch-update") : "";
+  return heading("探针节点", caption, updateAll + action("探测设置", "settings-form") + action("添加节点", "node-form", "", true)) +
     table("探针节点", ["节点", "运营商", "地区", "分组", "连接", "ICMP", "最近心跳", "操作"], rows, "node-table");
+}
+function formatBytes(bytes) {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
+  let unit = 0;
+  while (bytes >= 1024 && unit < units.length - 1) {
+    bytes /= 1024;
+    unit++;
+  }
+  return Number(bytes.toFixed(1)) + " " + units[unit];
+}
+function formatCapacity(capacity) {
+  if (!(capacity?.total_bytes > 0) || !Number.isFinite(capacity.used_bytes)) return "—";
+  return formatBytes(capacity.used_bytes) + " / " + formatBytes(capacity.total_bytes);
+}
+function nodeDetails(node) {
+  const observations = state.data.targets.flatMap(target => (target.latest ?? []).filter(item => item.node_id === node.id));
+  const lastProbe = observations.reduce((latest, item) => Math.max(latest, Date.parse(item.observed_at) || 0), 0);
+  const fresh = node.state === "online" ? observations.filter(isFresh) : [];
+  const fact = (label, value) => "<div><dt>" + label + "</dt><dd>" + value + "</dd></div>";
+  const stats = node.metrics;
+  const statsFresh = node.state === "online" && Date.now() - Date.parse(stats?.observed_at) <= 180_000;
+  const system = stats ? '<p class="subtle">采集于 ' + escape(time(stats.observed_at)) + "（北京时间）" +
+    (statsFresh ? "" : " · 上次上报") + '</p><dl class="node-detail-facts">' +
+    fact("系统", escape([stats.os, stats.arch].filter(Boolean).join(" · ") || "—")) +
+    fact("CPU", escape([stats.cpu_cores ? stats.cpu_cores + " 逻辑核" : "", Number.isFinite(stats.cpu_usage_percent)
+      ? "使用率 " + stats.cpu_usage_percent.toFixed(1) + "%" : ""].filter(Boolean).join(" · ") || "—")) +
+    fact("内存（已用 / 总量）", escape(formatCapacity(stats.memory))) +
+    fact("根文件系统（已用 / 总量）", escape(formatCapacity(stats.disk))) + "</dl>" :
+    '<p class="subtle">等待探针上报系统信息。</p>';
+  return '<dl class="node-detail-facts">' +
+    fact("连接状态", badge(nodeLabels[node.state] ?? nodeLabels.pending)) +
+    fact("最近心跳（北京时间）", escape(time(node.last_seen))) +
+    fact("版本", escape(node.version || "—")) +
+    fact("运营商 / 地区", escape([node.isp, node.location].filter(Boolean).join(" · ") || "—")) + "</dl>" +
+    '<section class="node-detail-section"><h3>最近探测</h3><dl class="node-detail-facts">' +
+    fact("探测时间（北京时间）", escape(time(lastProbe || null))) +
+    fact("近期目标可达性", '<span class="reachability-summary"><span>TCPing ' + reachabilityCount(fresh, "tcp") +
+      '</span><span>ICMP ' + reachabilityCount(fresh, "icmp") + "</span></span>") +
+    '</dl></section><section class="node-detail-section"><h3>系统资源</h3>' + system + "</section>";
+}
+function showNodeDetails(node) {
+  openDialog("探针详情", node.name, '<p class="form-message" role="status" data-node-details-error></p>' +
+    '<div data-node-details="' + escape(node.id) + '">' + nodeDetails(node) + "</div>");
+  void refresh();
+}
+function currentNodeDetails() {
+  return dialog.open ? dialog.querySelector("[data-node-details]") : null;
+}
+function syncNodeDetails(error = "") {
+  const details = currentNodeDetails();
+  if (!details) return;
+  dialog.querySelector("[data-node-details-error]").textContent = error;
+  if (error) return;
+  const node = state.data.nodes.find(node => node.id === details.dataset.nodeDetails);
+  details.innerHTML = node ? nodeDetails(node) : '<p class="subtle">探针节点已移除。</p>';
 }
 function events() {
   const rows = state.data.events.map(event => {
@@ -553,7 +620,10 @@ async function mailDialog() {
     '"></label><label class="full-field">收件地址<input name="recipients" maxlength="2560" placeholder="多个地址用逗号分隔" spellcheck="false" value="' +
     escape((config.recipients ?? []).join(", ")) + '"></label></div>' +
     '<fieldset class="group-field"><legend>通知事件</legend><div class="field-grid mail-events">' +
-    mailEvents.map(([key, label]) => check(key, label, selected.has(key))).join("") + '</div></fieldset></div>' +
+    mailEvents.map(([key, label]) => check(key, label, selected.has(key))).join("") + '</div></fieldset>' +
+    '<label>探针离线通知时长（分钟）<input type="number" name="probe_offline_minutes" min="1" max="60" step="1" value="' +
+    escape(config.probe_offline_minutes ?? 3) + '" aria-describedby="probe-offline-mail-help" required></label>' +
+    '<p class="subtle" id="probe-offline-mail-help">连续未收到探针心跳达到此时长后发送离线邮件。此设置仅作用于邮件通知。</p></div>' +
     '<p class="form-message" role="status" data-error></p><div class="dialog-actions">' +
     '<button type="submit" class="action" value="test">发送测试邮件</button> <button type="submit" class="action primary">保存设置</button></div></form>');
   const form = dialog.querySelector('[data-form="mail"]');
@@ -570,6 +640,7 @@ async function submitMail(form, testing) {
   const cfg = {
     enabled: data.has("enabled"), host: data.get("host"), port: Number(data.get("port")), security: data.get("security"),
     username: data.get("username"), password: data.get("password"), from: data.get("from"),
+    probe_offline_minutes: Number(data.get("probe_offline_minutes")),
     recipients: data.get("recipients").split(/[,，;；\n]+/).map(address => address.trim()).filter(Boolean),
     events: mailEvents.map(([key]) => key).filter(key => data.has(key))
   };
@@ -735,6 +806,45 @@ function updateStatus(task, showSuccess = false) {
   return '<div class="update-feedback">' + badge(appearance) +
     '<span class="subtle">' + escape(task.version) + "</span></div>";
 }
+function batchUpdateDialog() {
+  openDialog("一键更新探针和回程端", "",
+    '<form data-form="batch-update"><p>为在线且支持后台更新的探针节点和回程端提交更新。任务逐个执行，完成后对应服务会自动重启。</p>' +
+    '<p class="form-message" role="alert" data-error></p><div role="status">' +
+    '<p data-batch-result></p><p class="subtle" data-batch-skips hidden></p></div>' +
+    '<div class="dialog-actions"><button type="submit" class="action primary">提交更新</button></div></form>');
+}
+async function submitBatchUpdate(form) {
+  const submit = form.querySelector('[type="submit"]');
+  if (submit.disabled || submit.hidden) return;
+  const close = dialog.querySelector('[data-action="close"]');
+  const error = form.querySelector("[data-error]");
+  submit.disabled = close.disabled = true;
+  error.textContent = "";
+  try {
+    const { version, queued, skipped } = await api("updates", "POST");
+    if (!form.isConnected || !dialog.open) return;
+    const submitted = queued.probes + queued.return_runners;
+    const result = form.querySelector("[data-batch-result]");
+    result.textContent = submitted ? "已提交 " + version + " 更新。探针 " + queued.probes + " 个，回程端 " +
+      queued.return_runners + " 个。" : "本次没有需要提交更新的探针或回程端。";
+    result.className = submitted ? "form-message status-success" : "subtle";
+    const reasons = [
+      ["up_to_date", "版本无需更新"], ["active", "已有更新任务"], ["offline", "离线"],
+      ["unsupported", "暂不支持后台更新"], ["unregistered", "未注册"], ["version_unavailable", "版本未知或无法比较"]
+    ];
+    const parts = reasons.filter(([key]) => skipped[key] > 0).map(([key, label]) => label + " " + skipped[key] + " 个");
+    const details = form.querySelector("[data-batch-skips]");
+    details.textContent = parts.length ? "跳过：" + parts.join("、") : "";
+    details.hidden = parts.length === 0;
+    submit.hidden = true;
+    if (submitted) await refresh();
+  } catch (requestError) {
+    if (requestError.status === 401) showLogin("登录已过期，请重新登录。");
+    else if (form.isConnected && dialog.open) error.textContent = requestError.message;
+  } finally {
+    submit.disabled = close.disabled = false;
+  }
+}
 function showUpdateDialog(item, back = false) {
   const title = back ? "更新回程端" : "更新探针";
   const manual = action("手动更新命令", back ? "return-update" : "update-command", item.id);
@@ -883,6 +993,7 @@ async function refresh() {
     render();
     if (state.view === "detail" && routeView.panel !== "connectivity") await loadRoutes(state.targetID);
     syncUpdateDialog();
+    syncNodeDetails();
   } catch (error) {
     if (request !== latestRefresh || rowDrag || reorderPending) return;
     if (error.status === 401) {
@@ -891,6 +1002,7 @@ async function refresh() {
       if (!state.signedIn && !content.querySelector("[data-form=login]")) render();
       message("无法读取管理端状态：" + error.message);
       syncUpdateDialog("无法读取更新状态：" + error.message);
+      syncNodeDetails("无法刷新探针详情：" + error.message);
     }
   }
 }
@@ -942,7 +1054,7 @@ async function changePassword(form) {
   }
 }
 dialog.addEventListener("cancel", event => {
-  if (dialog.querySelector(':is([data-form="password"],[data-form="mail"]) [type="submit"]')?.disabled) event.preventDefault();
+  if (dialog.querySelector(':is([data-form="password"],[data-form="mail"],[data-form="batch-update"]) [type="submit"]')?.disabled) event.preventDefault();
 });
 dialog.addEventListener("close", () => {
   if (!dialog.open) {
@@ -982,7 +1094,9 @@ root.addEventListener("click", async event => {
     else if (action === "node-form") formDialog("node");
     else if (action === "edit-target" && target) formDialog("target", target);
     else if (action === "edit-node" && node) formDialog("node", node);
+    else if (action === "node-details" && node) showNodeDetails(node);
     else if (action === "settings-form") settingsDialog();
+    else if (action === "batch-update" && state.data?.release_configured) batchUpdateDialog();
     else if (action === "back") {
       navigate(state.previous);
       if (state.view === "overview" && routeView.changeKey) focusOverviewChange(routeView.changeKey);
@@ -1031,6 +1145,7 @@ root.addEventListener("submit", async event => {
   event.preventDefault();
   if (mode === "password") return changePassword(form);
   if (mode === "mail") return submitMail(form, event.submitter?.value === "test");
+  if (mode === "batch-update") return submitBatchUpdate(form);
   const submit = form.querySelector("[type=submit]");
   const feedback = form.querySelector("[data-error]");
   const values = Object.fromEntries(new FormData(form).entries());
@@ -1187,5 +1302,5 @@ content.addEventListener("keydown", event => {
 restorePage();
 void refresh();
 window.setInterval(() => {
-  if (state.signedIn && !document.hidden && !rowDrag && !reorderPending && (!dialog.open || currentUpdateDialog())) void refresh();
+  if (state.signedIn && !document.hidden && !rowDrag && !reorderPending && (!dialog.open || currentUpdateDialog() || currentNodeDetails())) void refresh();
 }, 20000);

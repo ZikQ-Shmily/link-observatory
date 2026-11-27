@@ -44,6 +44,8 @@ type nodeRecord struct {
 	RouteReady       bool          `json:"route_ready,omitempty"`
 	Egress4          egressAddress `json:"egress_v4,omitzero"`
 	Egress6          egressAddress `json:"egress_v6,omitzero"`
+
+	Metrics *protocol.HostMetrics `json:"metrics,omitempty"`
 }
 
 type roundStatus struct {

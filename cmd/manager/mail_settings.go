@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"maps"
 	"net/http"
 	"net/mail"
 	"slices"
@@ -12,15 +13,25 @@ import (
 )
 
 type mailSettings struct {
-	Enabled    bool       `json:"enabled"`
-	Host       string     `json:"host"`
-	Port       int        `json:"port"`
-	Security   string     `json:"security"`
-	Username   string     `json:"username"`
-	Password   string     `json:"password,omitempty"`
-	From       string     `json:"from"`
-	Recipients []string   `json:"recipients"`
-	Events     []mailKind `json:"events"`
+	Enabled             bool       `json:"enabled"`
+	Host                string     `json:"host"`
+	Port                int        `json:"port"`
+	Security            string     `json:"security"`
+	Username            string     `json:"username"`
+	Password            string     `json:"password,omitempty"`
+	From                string     `json:"from"`
+	Recipients          []string   `json:"recipients"`
+	Events              []mailKind `json:"events"`
+	ProbeOfflineMinutes int        `json:"probe_offline_minutes,omitempty"`
+}
+
+const maxProbeOfflineMailMinutes = 60
+
+func (m mailSettings) probeOfflineMinutes() int {
+	if m.ProbeOfflineMinutes < 1 || m.ProbeOfflineMinutes > maxProbeOfflineMailMinutes {
+		return int(offlineAfter / time.Minute)
+	}
+	return m.ProbeOfflineMinutes
 }
 
 type mailSettingsView struct {
@@ -104,13 +115,25 @@ func (s *server) getMailSettings(w http.ResponseWriter, _ *http.Request) {
 	hasPassword := cfg.Password != ""
 	cfg.Password = ""
 	cfg.Events = groupedMailEvents(cfg.Events)
+	cfg.ProbeOfflineMinutes = cfg.probeOfflineMinutes()
 	writeJSON(w, http.StatusOK, mailSettingsView{mailSettings: cfg, HasPassword: hasPassword})
 }
 
 func readMailSettings(w http.ResponseWriter, r *http.Request, test bool) (mailSettings, bool) {
-	var cfg mailSettings
-	if !decodeJSON(w, r, &cfg, 16<<10) {
-		return cfg, false
+	var input struct {
+		mailSettings
+		ProbeOfflineMinutes *int `json:"probe_offline_minutes"`
+	}
+	if !decodeJSON(w, r, &input, 16<<10) {
+		return mailSettings{}, false
+	}
+	cfg := input.mailSettings
+	if minutes := input.ProbeOfflineMinutes; minutes != nil {
+		if *minutes < 1 || *minutes > maxProbeOfflineMailMinutes {
+			writeError(w, http.StatusBadRequest, "探针离线通知时长须为 1–60 分钟。")
+			return cfg, false
+		}
+		cfg.ProbeOfflineMinutes = *minutes
 	}
 	cfg.Host = strings.TrimSpace(cfg.Host)
 	cfg.Username = strings.TrimSpace(cfg.Username)
@@ -192,12 +215,22 @@ func (s *server) updateMailSettings(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.applyStoredMailPassword(&cfg)
+	if cfg.ProbeOfflineMinutes == 0 {
+		cfg.ProbeOfflineMinutes = s.state.Mail.probeOfflineMinutes()
+	}
 	if cfg.Username != "" && cfg.Password == "" {
 		writeError(w, http.StatusBadRequest, "请输入 SMTP 密码或授权码。")
 		return
 	}
 	next := s.state
 	next.Mail = cfg
+	if !s.state.Mail.wants(mailProbeOffline) && cfg.wants(mailProbeOffline) {
+		next.Nodes = maps.Clone(next.Nodes)
+		for id, node := range next.Nodes {
+			node.MailOfflineSince = 0
+			next.Nodes[id] = node
+		}
+	}
 	if cfg.sameRoute(s.state.Mail) {
 		next.MailQueue = slices.DeleteFunc(slices.Clone(next.MailQueue), func(job mailJob) bool {
 			return !cfg.wants(job.Notice.Kind)

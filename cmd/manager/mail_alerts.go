@@ -20,24 +20,25 @@ const (
 )
 
 type mailNotice struct {
-	ProbeName string            `json:"probe_name,omitempty"`
-	Route     *routeChange      `json:"route,omitempty"`
-	Kind      mailKind          `json:"kind"`
-	Name      string            `json:"name,omitempty"`
-	ID        string            `json:"id,omitempty"`
-	Address   string            `json:"address,omitempty"`
-	IP        string            `json:"ip,omitempty"`
-	ISP       string            `json:"isp,omitempty"`
-	Location  string            `json:"location,omitempty"`
-	Group     string            `json:"group,omitempty"`
-	Version   string            `json:"version,omitempty"`
-	ISPs      []string          `json:"isps,omitempty"`
-	Mainland  reachabilityCount `json:"mainland,omitzero"`
-	Overseas  reachabilityCount `json:"overseas,omitzero"`
-	Previous  reachabilityCount `json:"previous,omitzero"`
-	At        time.Time         `json:"at"`
-	StartedAt time.Time         `json:"started_at,omitzero"`
-	LastSeen  time.Time         `json:"last_seen,omitzero"`
+	ProbeName         string            `json:"probe_name,omitempty"`
+	Route             *routeChange      `json:"route,omitempty"`
+	Kind              mailKind          `json:"kind"`
+	Name              string            `json:"name,omitempty"`
+	ID                string            `json:"id,omitempty"`
+	Address           string            `json:"address,omitempty"`
+	IP                string            `json:"ip,omitempty"`
+	ISP               string            `json:"isp,omitempty"`
+	Location          string            `json:"location,omitempty"`
+	Group             string            `json:"group,omitempty"`
+	Version           string            `json:"version,omitempty"`
+	ISPs              []string          `json:"isps,omitempty"`
+	Mainland          reachabilityCount `json:"mainland,omitzero"`
+	Overseas          reachabilityCount `json:"overseas,omitzero"`
+	Previous          reachabilityCount `json:"previous,omitzero"`
+	At                time.Time         `json:"at"`
+	StartedAt         time.Time         `json:"started_at,omitzero"`
+	LastSeen          time.Time         `json:"last_seen,omitzero"`
+	PreviousHeartbeat time.Time         `json:"previous_heartbeat,omitzero"`
 }
 
 func (state *diskState) routeChangeMail(change routeChange) {
@@ -57,33 +58,41 @@ type mailJob struct {
 	NextTry  time.Time  `json:"next_try,omitzero"`
 }
 
-func (state *diskState) enqueueMail(notice mailNotice) {
+func (state *diskState) enqueueMail(notice mailNotice) bool {
 	if !state.Mail.wants(notice.Kind) {
-		return
+		return false
 	}
 	if len(state.MailQueue) >= maxMailQueue {
 		log.Printf("mail queue full, skipped %s for %s", notice.Kind, notice.ID)
-		return
+		return false
 	}
 	state.MailQueue = append(slices.Clone(state.MailQueue), mailJob{ID: randomHex(16), Notice: notice})
+	return true
 }
 
 func (s *server) evaluateProbeAvailability(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	next := s.state
+	if !next.Mail.wants(mailProbeOffline) {
+		return
+	}
+	delay := int64(next.Mail.probeOfflineMinutes()) * int64(time.Minute/time.Second)
+	latestMissed := now.Unix() - delay
 	changed := false
 	for id, node := range s.state.Nodes {
-		if node.MailOfflineSince != 0 || !probeOffline(node, now) {
+		if node.MailOfflineSince != 0 || node.LastSeen <= 0 || node.LastSeen > latestMissed {
 			continue
+		}
+		node.MailOfflineSince = node.LastSeen + delay
+		if !next.enqueueMail(probeNotice(node, mailProbeOffline, now)) {
+			break
 		}
 		if !changed {
 			next.Nodes = maps.Clone(next.Nodes)
 			changed = true
 		}
-		node.MailOfflineSince = node.LastSeen + int64(offlineAfter/time.Second)
 		next.Nodes[id] = node
-		next.enqueueMail(probeNotice(node, mailProbeOffline, now))
 	}
 	if changed {
 		if err := writeState(s.filename, next); err != nil {
